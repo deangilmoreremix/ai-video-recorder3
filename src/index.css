@@ -1,0 +1,155 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --accent-color: #E44E51;
+  --accent-hover: #D43B3E;
+  color-scheme: light dark;
+}
+
+@layer base {
+  body {
+    @apply bg-gray-100 text-gray-900;
+  }
+
+  /* Enhanced Input Styles */
+  input[type="text"],
+  input[type="number"],
+  input[type="url"],
+  input[type="email"],
+  input[type="password"],
+  input[type="search"],
+  textarea,
+  select {
+    @apply bg-white text-gray-900 border-gray-300 rounded-lg shadow-sm
+    focus:ring-2 focus:ring-[#E44E51] focus:border-[#E44E51] 
+    placeholder-gray-400;
+  }
+
+  /* Range Input Styles */
+  input[type="range"] {
+    @apply h-2 bg-gray-200 rounded-full appearance-none cursor-pointer accent-[#E44E51];
+  }
+
+  input[type="range"]::-webkit-slider-thumb {
+    @apply w-4 h-4 bg-[#E44E51] rounded-full appearance-none cursor-pointer;
+  }
+
+  input[type="range"]::-moz-range-thumb {
+    @apply w-4 h-4 bg-[#E44E51] rounded-full appearance-none cursor-pointer;
+  }
+
+  /* File Input Styles */
+  input[type="file"] {
+    @apply text-sm text-gray-500
+      file:mr-4 file:py-2 file:px-4
+      file:rounded-full file:border-0
+      file:text-sm file:font-semibold
+      file:bg-[#E44E51]/10 file:text-[#E44E51]
+      hover:file:bg-[#E44E51]/20;
+  }
+
+  /* Color Input Styles */
+  input[type="color"] {
+    @apply h-10 bg-white border border-gray-300 rounded-lg p-1;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply px-4 py-2 rounded-lg font-medium transition-all duration-200;
+  }
+  
+  .btn-primary {
+    @apply bg-[#E44E51] text-white hover:bg-[#D43B3E] shadow-lg hover:shadow-[#E44E51]/25;
+  }
+  
+  .btn-secondary {
+    @apply bg-gray-100 text-gray-700 hover:bg-gray-200;
+  }
+
+  .select-custom {
+    @apply block w-full px-3 py-2 text-gray-900 bg-white border border-gray-300 rounded-lg 
+    focus:ring-2 focus:ring-[#E44E51] focus:border-[#E44E51] cursor-pointer hover:border-[#E44E51]
+    transition-colors duration-200;
+  }
+
+  .input-custom {
+    @apply block w-full px-3 py-2 text-gray-900 bg-white border border-gray-300 rounded-lg
+    focus:ring-2 focus:ring-[#E44E51] focus:border-[#E44E51] transition-colors duration-200;
+  }
+
+  /* Dark Mode Input Overrides */
+  .dark input[type="text"],
+  .dark input[type="number"],
+  .dark input[type="url"],
+  .dark input[type="email"],
+  .dark input[type="password"],
+  .dark input[type="search"],
+  .dark textarea,
+  .dark select {
+    @apply bg-gray-800 text-white border-gray-700;
+  }
+
+  /* Selected state */
+  .selected-item {
+    @apply ring-2 ring-[#E44E51];
+  }
+
+  /* Active state */
+  .active-state {
+    @apply bg-[#E44E51]/10 text-[#E44E51] border-[#E44E51];
+  }
+
+  /* Hover effects */
+  .hover-effect {
+    @apply hover:bg-[#E44E51]/10 hover:text-[#E44E51] hover:border-[#E44E51];
+  }
+
+  /* Focus styles */
+  .focus-ring {
+    @apply focus:ring-2 focus:ring-[#E44E51] focus:ring-offset-2;
+  }
+}
+
+/* Typing Animation */
+.typing-animation {
+  @apply relative;
+  animation: typing 3s steps(30, end), blink-caret .75s step-end infinite;
+  white-space: nowrap;
+  overflow: hidden;
+  border-right: 2px solid transparent;
+}
+
+@keyframes typing {
+  from { width: 0 }
+  to { width: 100% }
+}
+
+@keyframes blink-caret {
+  from, to { border-color: transparent }
+  50% { border-color: #E44E51 }
+}
+
+/* Modern Card Styles */
+.modern-card {
+  @apply bg-white rounded-xl shadow-lg p-6 transition-all duration-200
+  hover:shadow-xl hover:-translate-y-1;
+}
+
+/* Glass Effect */
+.glass {
+  @apply bg-white/80 backdrop-blur-lg;
+}
+
+/* Gradient Text */
+.gradient-text {
+  @apply text-transparent bg-clip-text bg-gradient-to-r from-[#E44E51] to-[#D43B3E];
+}
+
+/* Floating Action Button */
+.fab {
+  @apply fixed bottom-4 right-4 p-3 bg-[#E44E51] text-white rounded-full shadow-lg 
+  hover:bg-[#D43B3E] transition-colors hover:shadow-[#E44E51]/25;
+}
