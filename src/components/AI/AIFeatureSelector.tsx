@@ -1,81 +1,127 @@
 import React, { useState } from 'react';
 import { 
-  Camera, Brain, Sparkles, Layout, Focus, CloudFog,
-  Zap, Wind, Palette, Gauge, Eye, Scan, Layers, 
-  Scissors, RotateCcw, Crop, Wand2, Video, Eraser
+  Brain, Sparkles, Layout, Focus, CloudFog, Zap, 
+  Wind, Palette, Gauge, Eye, Scan, Settings, X, 
+  Camera, Layers, Send, Smile, ArrowUp, Filter, 
+  Mic, Monitor, Trash, HandMetal, Maximize, Film,
+  Lightbulb, Video, AlertCircle, Vibrate, Wand2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Tooltip } from '../ui/Tooltip';
 
-interface AIFeature {
-  id: string;
-  name: string;
-  description: string;
-  icon: React.ElementType;
-  component?: React.ReactNode;
-}
+const DEFAULT_FEATURE_ICONS = {
+  faceDetection: Camera,
+  facialLandmarks: Scan,
+  handPoseEstimation: HandMetal,
+  poseEstimation: ArrowUp,
+  backgroundRemoval: Trash,
+  backgroundBlur: Layers,
+  gestureRecognition: Send,
+  expressionDetection: Smile,
+  autoFraming: Focus,
+  enhancedLighting: Lightbulb,
+  sceneDetection: Monitor,
+  beautification: Sparkles,
+  styleTransfer: Wand2,
+  autoExposure: Filter,
+  colorEnhancement: Palette,
+  stabilization: Gauge,
+  noiseReduction: Wind,
+  speechRecognition: Mic,
+  sentimentAnalysis: AlertCircle,
+  superResolution: Maximize,
+  sceneSegmentation: Layout,
+  denoising: Film
+};
 
 interface AIFeatureSelectorProps {
   onFeatureSelect: (feature: string) => void;
   activeFeature: string | null;
   videoRef: React.RefObject<HTMLVideoElement>;
+  featureIcons?: Record<string, React.ElementType>;
 }
 
 export const AIFeatureSelector: React.FC<AIFeatureSelectorProps> = ({
   onFeatureSelect,
   activeFeature,
-  videoRef
+  videoRef,
+  featureIcons = {}
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
+  const mergedIcons = { ...DEFAULT_FEATURE_ICONS, ...featureIcons };
 
-  const features: AIFeature[] = [
+  const features = [
     {
       id: 'faceDetection',
       name: 'Face Detection',
       description: 'Detect and track faces in real-time',
-      icon: Camera
+      icon: mergedIcons.faceDetection
     },
     {
       id: 'facialLandmarks',
       name: 'Facial Landmarks',
       description: 'Track 468 facial points for precise facial analysis',
-      icon: Eye
+      icon: mergedIcons.facialLandmarks
     },
     {
-      id: 'handPose',
+      id: 'handPoseEstimation',
       name: 'Hand Tracking',
       description: 'Detect hand positions and gestures',
-      icon: Layout
+      icon: mergedIcons.handPoseEstimation
     },
     {
-      id: 'bodySegmentation',
-      name: 'Background Effects',
-      description: 'Apply effects to video background',
-      icon: Layers
+      id: 'backgroundBlur',
+      name: 'Background Blur',
+      description: 'Apply blur effect to video background',
+      icon: mergedIcons.backgroundBlur
     },
     {
-      id: 'videoStabilization',
-      name: 'Video Stabilization',
+      id: 'backgroundRemoval',
+      name: 'Background Removal',
+      description: 'Remove background completely',
+      icon: mergedIcons.backgroundRemoval
+    },
+    {
+      id: 'expressionDetection',
+      name: 'Expression Detection',
+      description: 'Detect facial expressions and emotions',
+      icon: mergedIcons.expressionDetection
+    },
+    {
+      id: 'gestureRecognition',
+      name: 'Gesture Recognition',
+      description: 'Control recording with hand gestures',
+      icon: mergedIcons.gestureRecognition
+    },
+    {
+      id: 'autoFraming',
+      name: 'Auto Framing',
+      description: 'Automatically frame and follow subjects',
+      icon: mergedIcons.autoFraming
+    },
+    {
+      id: 'beautification',
+      name: 'Beautification',
+      description: 'Enhance facial features automatically',
+      icon: mergedIcons.beautification
+    },
+    {
+      id: 'enhancedLighting',
+      name: 'Enhanced Lighting',
+      description: 'Automatically adjust lighting conditions',
+      icon: mergedIcons.enhancedLighting
+    },
+    {
+      id: 'styleTransfer',
+      name: 'Style Transfer',
+      description: 'Apply artistic styles to your video',
+      icon: mergedIcons.styleTransfer
+    },
+    {
+      id: 'stabilization',
+      name: 'Stabilization',
       description: 'Reduce camera shake and motion',
-      icon: RotateCcw
-    },
-    {
-      id: 'smartCropping',
-      name: 'Smart Cropping',
-      description: 'Automatically frame your video optimally',
-      icon: Crop
-    },
-    {
-      id: 'frameInterpolation',
-      name: 'Frame Interpolation',
-      description: 'Create smooth slow-motion by generating intermediate frames',
-      icon: Video
-    },
-    {
-      id: 'imageInpainting',
-      name: 'Content Removal',
-      description: 'Remove unwanted objects from your video',
-      icon: Eraser
+      icon: mergedIcons.stabilization
     }
   ];
 
@@ -87,9 +133,18 @@ export const AIFeatureSelector: React.FC<AIFeatureSelectorProps> = ({
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
-            className="absolute bottom-full mb-2 left-0 bg-white rounded-lg shadow-lg p-4 w-48 z-20 overflow-hidden"
+            className="absolute bottom-full mb-2 right-0 bg-white rounded-lg shadow-lg p-4 w-64 z-20 overflow-hidden"
           >
-            <div className="space-y-2">
+            <div className="flex justify-between items-center mb-3">
+              <h4 className="text-sm font-medium">AI Features</h4>
+              <button 
+                onClick={() => setIsExpanded(false)}
+                className="p-1 hover:bg-gray-100 rounded-full"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="space-y-2 max-h-[60vh] overflow-y-auto">
               {features.map((feature) => (
                 <Tooltip key={feature.id} content={feature.description}>
                   <button

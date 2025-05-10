@@ -1,188 +1,205 @@
 import React from 'react';
 import { 
   Camera, Brain, Sparkles, Layout, Focus, CloudFog,
-  Zap, Wind, Palette, Gauge, Eye, Scan, Layers
+  Zap, Wind, Palette, Gauge, Eye, Scan, Layers,
+  Mic, AlertCircle, HandMetal, Smile, Monitor, Trash,
+  Video, Megaphone, Maximize, Filter, Image, Lightbulb,
+  Wand2, Send, ArrowUp, Vibrate, Film
 } from 'lucide-react';
 import { Tooltip } from '../ui/Tooltip';
 import { motion } from 'framer-motion';
-
-interface AIFeature {
-  id: keyof typeof featureIcons;
-  name: string;
-  description: string;
-  icon: any;
-}
-
-const featureIcons = {
-  faceDetection: Camera,
-  facialLandmarks: Eye,
-  handPoseEstimation: Layout,
-  bodyPoseEstimation: Zap,
-  objectDetection: Scan,
-  beautification: Sparkles,
-  backgroundBlur: Layers,
-  autoFraming: Focus,
-  expressionDetection: Eye,
-  enhancedLighting: CloudFog,
-  sceneDetection: Brain,
-  noiseReduction: Wind,
-  colorEnhancement: Palette,
-  stabilization: Gauge,
-  autoExposure: Zap,
-  denoising: Scan
-};
-
-const featureDescriptions = {
-  faceDetection: 'Detect and track faces in real-time',
-  facialLandmarks: 'Identify 468 facial landmark points for precise tracking',
-  handPoseEstimation: 'Track hand positions and gestures',
-  bodyPoseEstimation: 'Track full body positions and movements',
-  objectDetection: 'Identify and track objects in the scene',
-  beautification: 'Enhance facial features automatically',
-  backgroundBlur: 'Blur background while keeping subject in focus',
-  autoFraming: 'Automatically frame and follow subjects',
-  expressionDetection: 'Detect facial expressions and emotions',
-  enhancedLighting: 'Automatically adjust lighting conditions',
-  sceneDetection: 'Detect and optimize for different scenes',
-  noiseReduction: 'Reduce video and audio noise',
-  colorEnhancement: 'Optimize colors and white balance',
-  stabilization: 'Reduce camera shake and motion',
-  autoExposure: 'Dynamic exposure adjustment',
-  denoising: 'Advanced noise reduction'
-};
+import { AIFeature } from '../../hooks/useAIFeatures';
 
 interface AIFeatureGridProps {
-  features: Record<string, { enabled: boolean; sensitivity: number }>;
-  onToggleFeature: (featureId: string) => void;
-  onUpdateSettings?: (featureId: string, settings: any) => void;
+  onFeatureToggle: (feature: string) => void;
+  enabledFeatures: Record<string, AIFeature>;
   isProcessing?: boolean;
+  compact?: boolean;
 }
 
-export const AIFeatureGrid: React.FC<AIFeatureGridProps> = ({
-  features,
-  onToggleFeature,
-  onUpdateSettings,
-  isProcessing = false
+export const AIFeatureGrid: React.FC<AIFeatureGridProps> = ({ 
+  onFeatureToggle, 
+  enabledFeatures,
+  isProcessing = false,
+  compact = false
 }) => {
-  const aiFeatures: AIFeature[] = [
+  const features = [
     {
       id: 'faceDetection',
       name: 'Face Detection',
-      description: featureDescriptions.faceDetection,
-      icon: featureIcons.faceDetection
+      icon: Camera,
+      description: 'Detect and track faces in real-time'
     },
     {
       id: 'facialLandmarks',
       name: 'Facial Landmarks',
-      description: featureDescriptions.facialLandmarks,
-      icon: featureIcons.facialLandmarks
+      icon: Scan,
+      description: 'Identify facial points for precise tracking'
     },
     {
       id: 'handPoseEstimation',
       name: 'Hand Tracking',
-      description: featureDescriptions.handPoseEstimation,
-      icon: featureIcons.handPoseEstimation
+      icon: HandMetal,
+      description: 'Track hand positions and gestures'
+    },
+    {
+      id: 'poseEstimation',
+      name: 'Pose Estimation',
+      icon: Vibrate,
+      description: 'Track full body positions and movements'
+    },
+    {
+      id: 'backgroundRemoval',
+      name: 'Background Removal',
+      icon: Trash,
+      description: 'Remove background completely'
     },
     {
       id: 'backgroundBlur',
       name: 'Background Blur',
-      description: featureDescriptions.backgroundBlur,
-      icon: featureIcons.backgroundBlur
+      icon: Layers,
+      description: 'Blur background while keeping subject in focus'
+    },
+    {
+      id: 'gestureRecognition',
+      name: 'Gesture Control',
+      icon: Send,
+      description: 'Control recording with hand gestures'
     },
     {
       id: 'expressionDetection',
       name: 'Expression Detection',
-      description: featureDescriptions.expressionDetection,
-      icon: featureIcons.expressionDetection
+      icon: Smile,
+      description: 'Detect facial expressions and emotions'
+    },
+    {
+      id: 'autoFraming',
+      name: 'Auto Framing',
+      icon: Focus,
+      description: 'Automatically frame and follow subjects'
     },
     {
       id: 'enhancedLighting',
       name: 'Enhanced Lighting',
-      description: featureDescriptions.enhancedLighting,
-      icon: featureIcons.enhancedLighting
+      icon: Lightbulb,
+      description: 'Automatically adjust lighting conditions'
     },
     {
-      id: 'objectDetection',
-      name: 'Object Detection',
-      description: featureDescriptions.objectDetection,
-      icon: featureIcons.objectDetection
+      id: 'sceneDetection',
+      name: 'Scene Detection',
+      icon: Monitor,
+      description: 'Detect and optimize for different scenes'
     },
     {
-      id: 'noiseReduction',
-      name: 'Noise Reduction',
-      description: featureDescriptions.noiseReduction,
-      icon: featureIcons.noiseReduction
+      id: 'beautification',
+      name: 'Beautification',
+      icon: Sparkles,
+      description: 'Enhance facial features automatically'
     },
     {
-      id: 'colorEnhancement',
-      name: 'Color Enhancement',
-      description: featureDescriptions.colorEnhancement,
-      icon: featureIcons.colorEnhancement
-    },
-    {
-      id: 'stabilization',
-      name: 'Stabilization',
-      description: featureDescriptions.stabilization,
-      icon: featureIcons.stabilization
+      id: 'styleTransfer',
+      name: 'Style Transfer',
+      icon: Wand2,
+      description: 'Apply artistic styles to your video'
     },
     {
       id: 'autoExposure',
       name: 'Auto Exposure',
-      description: featureDescriptions.autoExposure,
-      icon: featureIcons.autoExposure
+      icon: Filter,
+      description: 'Dynamic exposure adjustment'
     },
     {
-      id: 'denoising',
-      name: 'Denoising',
-      description: featureDescriptions.denoising,
-      icon: featureIcons.denoising
+      id: 'colorEnhancement',
+      name: 'Color Enhancement',
+      icon: Palette,
+      description: 'Optimize colors and white balance'
+    },
+    {
+      id: 'stabilization',
+      name: 'Stabilization',
+      icon: Gauge,
+      description: 'Reduce camera shake and motion'
+    },
+    {
+      id: 'noiseReduction',
+      name: 'Noise Reduction',
+      icon: Wind,
+      description: 'Reduce video noise'
+    },
+    {
+      id: 'speechRecognition',
+      name: 'Speech Recognition',
+      icon: Mic,
+      description: 'Generate real-time captions'
+    },
+    {
+      id: 'sentimentAnalysis',
+      name: 'Sentiment Analysis',
+      icon: AlertCircle,
+      description: 'Analyze emotional tone in speech'
+    },
+    {
+      id: 'superResolution',
+      name: 'Super Resolution',
+      icon: Maximize,
+      description: 'Improve video quality automatically'
     }
   ];
 
-  return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-      {aiFeatures.map((feature) => {
-        const Icon = feature.icon;
-        const isEnabled = features[feature.id]?.enabled;
-        const isDisabled = isProcessing || 
-                          (feature.id === 'facialLandmarks' && !features['faceDetection']?.enabled);
+  // Filter the displayed features for compact mode
+  const displayedFeatures = compact 
+    ? features.slice(0, 9) // Just show the first 9 in compact mode
+    : features;
 
-        return (
-          <Tooltip key={feature.id} content={feature.description}>
-            <motion.button
-              onClick={() => !isDisabled && onToggleFeature(feature.id)}
-              disabled={isDisabled}
-              whileHover={{ scale: isDisabled ? 1 : 1.02 }}
-              whileTap={{ scale: isDisabled ? 1 : 0.98 }}
-              className={`flex flex-col items-center p-4 rounded-lg border transition-all ${
-                isEnabled 
-                  ? 'bg-[#E44E51]/10 border-[#E44E51] text-[#E44E51]' 
-                  : 'bg-white border-gray-200 hover:border-[#E44E51] hover:bg-[#E44E51]/5'
-              } ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-            >
-              <Icon className="w-6 h-6 mb-2" />
-              <span className="text-sm text-center font-medium">{feature.name}</span>
-              {onUpdateSettings && isEnabled && (
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.1"
-                  value={features[feature.id]?.sensitivity || 0.5}
-                  onChange={(e) => onUpdateSettings(feature.id, {
-                    sensitivity: parseFloat(e.target.value)
-                  })}
-                  className="w-full mt-2 accent-[#E44E51]"
-                  onClick={(e) => e.stopPropagation()}
-                />
-              )}
-              {isProcessing && isEnabled && (
-                <div className="mt-2 w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-              )}
-            </motion.button>
-          </Tooltip>
-        );
-      })}
+  return (
+    <div className="space-y-4">
+      <div className={`grid ${compact ? 'grid-cols-3' : 'grid-cols-2 sm:grid-cols-4 md:grid-cols-5'} gap-3`}>
+        {displayedFeatures.map(({ id, name, icon: Icon, description }) => {
+          const feature = enabledFeatures[id];
+          const isEnabled = feature?.enabled;
+          const isLoading = feature?.loading;
+          const hasError = !!feature?.error;
+          
+          return (
+            <Tooltip key={id} content={feature?.error || description}>
+              <motion.button
+                onClick={() => !isProcessing && onFeatureToggle(id)}
+                disabled={isProcessing}
+                whileHover={{ scale: isProcessing ? 1 : 1.03 }}
+                whileTap={{ scale: isProcessing ? 1 : 0.97 }}
+                className={`flex flex-col items-center p-3 rounded-lg border transition-all ${
+                  isEnabled 
+                    ? 'bg-[#E44E51]/10 border-[#E44E51] text-[#E44E51]' 
+                    : hasError
+                      ? 'bg-red-50 border-red-200 text-red-500'
+                      : 'bg-white border-gray-200 hover:border-[#E44E51] hover:bg-[#E44E51]/5'
+                } ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+                <Icon className="w-6 h-6 mb-2" />
+                <span className="text-xs text-center line-clamp-2">{name}</span>
+                {(isProcessing || isLoading) && isEnabled && (
+                  <div className="mt-2 w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                )}
+                {hasError && !isLoading && (
+                  <AlertCircle className="mt-2 w-4 h-4 text-red-500" />
+                )}
+              </motion.button>
+            </Tooltip>
+          );
+        })}
+      </div>
+
+      {isProcessing && (
+        <div className="text-center text-sm text-gray-500">
+          Processing media with AI features...
+        </div>
+      )}
+      
+      {!compact && (
+        <div className="text-center text-xs text-gray-500 italic">
+          Enable AI features to enhance your video recording in real-time
+        </div>
+      )}
     </div>
   );
 };

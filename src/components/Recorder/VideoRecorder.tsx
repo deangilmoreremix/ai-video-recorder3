@@ -58,10 +58,10 @@ export const VideoRecorder: React.FC = () => {
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // AI Features
-  const { features, toggleFeature, loadModels, isModelsLoaded } = useAIFeatures();
+  const { features, toggleFeature, loadModels, isModelsLoaded, processFrame } = useAIFeatures();
+  const [processingCanvas, setProcessingCanvas] = useState<HTMLCanvasElement | null>(null);
 
   // Format recording time
   const formatTime = (seconds: number) => {
@@ -75,6 +75,14 @@ export const VideoRecorder: React.FC = () => {
     loadModels().catch(err => {
       console.error("Failed to load AI models:", err);
     });
+    
+    // Create canvas for processing
+    const canvas = document.createElement('canvas');
+    setProcessingCanvas(canvas);
+    
+    return () => {
+      setProcessingCanvas(null);
+    };
   }, [loadModels]);
 
   // Get available audio devices
@@ -140,14 +148,20 @@ export const VideoRecorder: React.FC = () => {
       try {
         if (!videoRef.current || videoRef.current.srcObject) return;
         
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-          video: selectedCameraId ? { deviceId: { exact: selectedCameraId } } : true,
-          audio: false // No audio needed for preview
-        });
-        
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          streamRef.current = stream;
+        // Only set up preview if we have camera and mic permissions
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ 
+            video: selectedCameraId ? { deviceId: { exact: selectedCameraId } } : true,
+            audio: false // No audio needed for preview
+          });
+          
+          if (videoRef.current) {
+            videoRef.current.srcObject = stream;
+            streamRef.current = stream;
+            videoRef.current.play();
+          }
+        } catch (err) {
+          console.error('Error setting up initial preview:', err);
         }
       } catch (err) {
         console.error('Error setting up initial preview:', err);
@@ -157,6 +171,69 @@ export const VideoRecorder: React.FC = () => {
     setupInitialPreview();
   }, [selectedCameraId]);
 
+  // Process frames with AI when not recording
+  useEffect(() => {
+    let animationFrame: number;
+    
+    const processCameraPreview = async () => {
+      if (isRecording || !videoRef.current || !processingCanvas || !isModelsLoaded) {
+        animationFrame = requestAnimationFrame(processCameraPreview);
+        return;
+      }
+      
+      if (videoRef.current.readyState >= 2) {
+        try {
+          // Ensure canvas dimensions match video
+          if (processingCanvas.width !== videoRef.current.videoWidth ||
+              processingCanvas.height !== videoRef.current.videoHeight) {
+            processingCanvas.width = videoRef.current.videoWidth;
+            processingCanvas.height = videoRef.current.videoHeight;
+          }
+          
+          // Process the frame
+          await processFrame(videoRef.current, processingCanvas);
+          
+          // Draw the processed frame to the video element if any feature is enabled
+          const hasEnabledFeatures = Object.values(features).some(f => f.enabled);
+          
+          if (hasEnabledFeatures) {
+            // Create a temporary video stream from the canvas
+            const stream = processingCanvas.captureStream();
+            
+            // Apply the stream directly to the video element
+            // This is a simplified approach - in a real implementation 
+            // you would maintain the original stream and only replace 
+            // what's being displayed
+            if (videoRef.current.srcObject !== stream && !isRecording) {
+              // Store the original stream for recording
+              if (!streamRef.current) {
+                streamRef.current = videoRef.current.srcObject as MediaStream;
+              }
+              
+              // Apply processed stream for display only
+              videoRef.current.srcObject = stream;
+            }
+          } else if (streamRef.current && videoRef.current.srcObject !== streamRef.current) {
+            // Restore original stream if no features are enabled
+            videoRef.current.srcObject = streamRef.current;
+          }
+        } catch (error) {
+          console.error('Error processing preview:', error);
+        }
+      }
+      
+      animationFrame = requestAnimationFrame(processCameraPreview);
+    };
+    
+    if (!isRecording && !showFullAI) {
+      processCameraPreview();
+    }
+    
+    return () => {
+      cancelAnimationFrame(animationFrame);
+    };
+  }, [isRecording, showFullAI, processFrame, isModelsLoaded, features]);
+
   const startRecording = async () => {
     setIsProcessing(true);
     chunksRef.current = [];
@@ -164,17 +241,25 @@ export const VideoRecorder: React.FC = () => {
     
     try {
       let stream: MediaStream;
+      
+      // For audio constraints
       const audioConstraints = {
         deviceId: selectedMicId ? { exact: selectedMicId } : undefined,
         echoCancellation: true,
         noiseSuppression: true,
-        autoGainControl: true
+        autoGainControl: true,
+        volume: micVolume,
+        muted: isMicMuted
       };
 
+      // For video constraints
       const videoConstraints = selectedCameraId 
         ? { deviceId: { exact: selectedCameraId } }
         : true;
 
+      // Determine if we need to use the AI processed stream
+      const useAIProcessing = Object.values(features).some(f => f.enabled);
+      
       switch (recordingMode) {
         case 'screen':
           const screenStream = await navigator.mediaDevices.getDisplayMedia({ 
@@ -238,16 +323,39 @@ export const VideoRecorder: React.FC = () => {
           break;
           
         default: // webcam
-          stream = await navigator.mediaDevices.getUserMedia({ 
-            video: videoConstraints,
-            audio: audioConstraints
-          });
+          if (useAIProcessing && processingCanvas && isModelsLoaded) {
+            // Get the regular webcam stream for audio
+            const regularStream = await navigator.mediaDevices.getUserMedia({ 
+              video: videoConstraints,
+              audio: audioConstraints
+            });
+            
+            // Create a stream from the processing canvas
+            const canvasStream = processingCanvas.captureStream(30); // 30 FPS
+            
+            // Combine canvas video with original audio
+            const audioTracks = regularStream.getAudioTracks();
+            const videoTracks = canvasStream.getVideoTracks();
+            
+            stream = new MediaStream([
+              ...videoTracks,
+              ...audioTracks
+            ]);
+            
+            // Store regular stream for preview
+            streamRef.current = regularStream;
+          } else {
+            // Standard webcam recording without AI
+            stream = await navigator.mediaDevices.getUserMedia({ 
+              video: videoConstraints,
+              audio: audioConstraints
+            });
+            streamRef.current = stream;
+          }
           break;
       }
 
-      // Store the stream for cleanup
-      streamRef.current = stream;
-
+      // Set up video preview
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         videoRef.current.muted = true; // Mute to prevent feedback
@@ -271,31 +379,32 @@ export const VideoRecorder: React.FC = () => {
         mediaRecorderRef.current = mediaRecorder;
       }
 
+      // Set up data handler
       mediaRecorderRef.current.ondataavailable = (e) => {
         if (e.data.size > 0) {
           chunksRef.current.push(e.data);
         }
       };
 
+      // Handle recording completion
       mediaRecorderRef.current.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: 'video/webm' });
+        // Create final video blob
+        const mimeType = mediaRecorderRef.current?.mimeType || 'video/webm';
+        const blob = new Blob(chunksRef.current, { type: mimeType });
         setRecordedBlob(blob);
         
-        if (streamRef.current) {
-          streamRef.current.getTracks().forEach(track => track.stop());
-          streamRef.current = null;
-        }
-        
-        // Stop timer
+        // Clean up recording resources
         if (timerIntervalRef.current) {
           clearInterval(timerIntervalRef.current);
           timerIntervalRef.current = null;
         }
         
+        // Show download dialog
         setShowDownloadDialog(true);
       };
 
-      mediaRecorderRef.current.start();
+      // Start recording
+      mediaRecorderRef.current.start(1000); // Collect data every second
       setIsRecording(true);
       
       // Start timer
@@ -320,7 +429,7 @@ export const VideoRecorder: React.FC = () => {
   };
 
   const pauseRecording = () => {
-    if (mediaRecorderRef.current && isRecording && !isPaused && 'pause' in mediaRecorderRef.current) {
+    if (mediaRecorderRef.current && isRecording && !isPaused) {
       mediaRecorderRef.current.pause();
       setIsPaused(true);
       
@@ -333,7 +442,7 @@ export const VideoRecorder: React.FC = () => {
   };
 
   const resumeRecording = () => {
-    if (mediaRecorderRef.current && isRecording && isPaused && 'resume' in mediaRecorderRef.current) {
+    if (mediaRecorderRef.current && isRecording && isPaused) {
       mediaRecorderRef.current.resume();
       setIsPaused(false);
       
@@ -355,9 +464,18 @@ export const VideoRecorder: React.FC = () => {
 
     if (file && file.type.startsWith('video/')) {
       const url = URL.createObjectURL(file);
+      
+      // Clean up any previous URL
+      if (processedVideoUrl) {
+        URL.revokeObjectURL(processedVideoUrl);
+        setProcessedVideoUrl(null);
+      }
+      
       if (videoRef.current) {
-        videoRef.current.srcObject = null; // Clear any existing stream
+        videoRef.current.srcObject = null;
         videoRef.current.src = url;
+        videoRef.current.load();
+        videoRef.current.play();
       }
     }
   };
@@ -796,8 +914,8 @@ export const VideoRecorder: React.FC = () => {
           </div>
           
           <AIFeatureGrid
-            features={features}
-            onToggleFeature={toggleFeature}
+            enabledFeatures={features}
+            onFeatureToggle={toggleFeature}
             isProcessing={isProcessing}
           />
         </div>
