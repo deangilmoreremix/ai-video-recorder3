@@ -10,6 +10,7 @@ import { AIFeatureGrid } from '../AI/AIFeatureGrid';
 import { AIProcessingOverlay } from '../AI/AIProcessingOverlay';
 import { EnhancedDownloadDialog } from './EnhancedDownloadDialog';
 import { Tooltip } from '../ui/Tooltip';
+import { AdvancedFaceRecognition } from '../AI/AdvancedFaceRecognition';
 
 interface AudioDevice {
   deviceId: string;
@@ -272,6 +273,14 @@ export const VideoRecorder: React.FC = () => {
           isVisible={isProcessing}
           message="Initializing recording..."
         />
+
+        {/* Face recognition overlay - only show when not recording */}
+        {!isRecording && features.facialLandmarks?.enabled && (
+          <AdvancedFaceRecognition 
+            videoRef={videoRef}
+            enabled={features.facialLandmarks.enabled}
+          />
+        )}
       </div>
 
       {/* Recording Controls */}
