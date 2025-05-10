@@ -3,7 +3,7 @@ import {
   Video, Upload, Volume2, VolumeX, Maximize2, Minimize2,
   Play, Pause, Square, Brain, Camera, Monitor, Layout,
   Settings, HelpCircle, Download, Save, Mic, MicOff,
-  ChevronDown, AlertCircle
+  ChevronDown
 } from 'lucide-react';
 import { useAIFeatures } from '../../hooks/useAIFeatures';
 import { AIFeatureGrid } from '../AI/AIFeatureGrid';
@@ -24,7 +24,6 @@ export const VideoRecorder: React.FC = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
   const [showDownloadDialog, setShowDownloadDialog] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Audio state
   const [audioDevices, setAudioDevices] = useState<AudioDevice[]>([]);
@@ -40,7 +39,14 @@ export const VideoRecorder: React.FC = () => {
   const streamRef = useRef<MediaStream | null>(null);
 
   // AI Features
-  const { features, toggleFeature } = useAIFeatures();
+  const { features, toggleFeature, loadModels } = useAIFeatures();
+
+  // Load AI models on component mount
+  useEffect(() => {
+    loadModels().catch(err => {
+      console.error("Failed to load AI models:", err);
+    });
+  }, [loadModels]);
 
   // Get available audio devices
   useEffect(() => {
@@ -81,7 +87,6 @@ export const VideoRecorder: React.FC = () => {
 
   const startRecording = async () => {
     setIsProcessing(true);
-    setErrorMessage(null);
     chunksRef.current = [];
     
     try {
@@ -94,114 +99,51 @@ export const VideoRecorder: React.FC = () => {
       };
 
       switch (recordingMode) {
-        case 'screen': {
-          try {
-            // First get the display media (screen)
-            const displayStream = await navigator.mediaDevices.getDisplayMedia({ 
-              video: true
-            });
-            
-            // Then get audio from the microphone
-            const micStream = await navigator.mediaDevices.getUserMedia({ 
-              audio: audioConstraints 
-            });
-            
-            // Create a new stream with video from screen and audio from mic
-            const tracks = [
-              ...displayStream.getVideoTracks(),
-              ...micStream.getAudioTracks()
-            ];
-            
-            stream = new MediaStream(tracks);
-            
-            // Save reference to both streams for cleanup
-            displayStream.getTracks().forEach(track => {
-              track.onended = () => {
-                if (isRecording) {
-                  stopRecording();
-                }
-              };
-            });
-          } catch (error) {
-            console.error("Error obtaining screen media:", error);
-            setErrorMessage("Failed to access your screen. Please ensure you grant permission when prompted.");
-            setIsProcessing(false);
-            return;
-          }
+        case 'screen':
+          const screenStream = await navigator.mediaDevices.getDisplayMedia({ 
+            video: true,
+            audio: true 
+          });
+          const micStream = await navigator.mediaDevices.getUserMedia({ 
+            audio: audioConstraints 
+          });
+          stream = new MediaStream([
+            ...screenStream.getVideoTracks(),
+            ...micStream.getAudioTracks()
+          ]);
           break;
-        }
-        case 'pip': {
-          try {
-            // Get screen stream
-            const displayStream = await navigator.mediaDevices.getDisplayMedia({ 
-              video: true
-            });
-            
-            // Get webcam stream
-            const webcamStream = await navigator.mediaDevices.getUserMedia({ 
+        case 'pip':
+          const [displayStream, webcamStream] = await Promise.all([
+            navigator.mediaDevices.getDisplayMedia({ video: true, audio: true }),
+            navigator.mediaDevices.getUserMedia({ 
               video: true,
               audio: audioConstraints 
-            });
-            
-            // For PiP we need video from screen, optional video from webcam for PiP, and audio from mic
-            stream = new MediaStream([
-              ...displayStream.getVideoTracks(),
-              ...webcamStream.getAudioTracks()
-            ]);
-            
-            // Handle screen share being stopped by user
-            displayStream.getVideoTracks()[0].onended = () => {
-              if (isRecording) {
-                stopRecording();
-              }
-            };
-            
-            // Save reference to webcam video for PiP display
-            // In a real implementation, you would need additional UI for the PiP
-            // This is just showing how to get both streams
-          } catch (error) {
-            console.error("Error setting up PiP:", error);
-            setErrorMessage("Failed to access your screen and camera. Please ensure you grant all required permissions.");
-            setIsProcessing(false);
-            return;
-          }
+            })
+          ]);
+          stream = new MediaStream([
+            ...displayStream.getVideoTracks(),
+            ...webcamStream.getVideoTracks(),
+            ...webcamStream.getAudioTracks()
+          ]);
           break;
-        }
         default: // webcam
-          try {
-            stream = await navigator.mediaDevices.getUserMedia({ 
-              video: true,
-              audio: audioConstraints
-            });
-          } catch (error) {
-            console.error("Error accessing webcam:", error);
-            setErrorMessage("Failed to access your camera. Please ensure you grant permission and that your camera is not in use by another application.");
-            setIsProcessing(false);
-            return;
-          }
+          stream = await navigator.mediaDevices.getUserMedia({ 
+            video: true,
+            audio: audioConstraints
+          });
           break;
       }
 
-      // Store stream for cleanup
+      // Store the stream for cleanup
       streamRef.current = stream;
 
-      // Display the stream in the video element
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         videoRef.current.muted = true; // Mute to prevent feedback
-        videoRef.current.onloadedmetadata = () => {
-          videoRef.current?.play().catch(error => {
-            console.error("Error playing video:", error);
-          });
-        };
       }
 
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: MediaRecorder.isTypeSupported('video/webm;codecs=vp9') 
-          ? 'video/webm;codecs=vp9' 
-          : 'video/webm'
-      });
-      
+      const options = { mimeType: 'video/webm;codecs=vp9,opus' };
+      const mediaRecorder = new MediaRecorder(stream, options);
       mediaRecorderRef.current = mediaRecorder;
 
       mediaRecorder.ondataavailable = (e) => {
@@ -211,31 +153,21 @@ export const VideoRecorder: React.FC = () => {
       };
 
       mediaRecorder.onstop = () => {
-        // Create the final recording blob
-        const blob = new Blob(chunksRef.current, { 
-          type: mediaRecorder.mimeType 
-        });
+        const blob = new Blob(chunksRef.current, { type: 'video/webm' });
         setRecordedBlob(blob);
         setShowDownloadDialog(true);
         
-        // Clean up tracks
         if (streamRef.current) {
           streamRef.current.getTracks().forEach(track => track.stop());
           streamRef.current = null;
         }
-
-        // Reset the video element
-        if (videoRef.current) {
-          videoRef.current.srcObject = null;
-        }
       };
 
-      mediaRecorder.start(1000); // Collect data every second
+      mediaRecorder.start();
       setIsRecording(true);
-      
     } catch (err) {
       console.error('Error starting recording:', err);
-      setErrorMessage('An unexpected error occurred while starting the recording. Please try again.');
+      alert(`Failed to start recording: ${err.message}`);
     } finally {
       setIsProcessing(false);
     }
@@ -261,9 +193,33 @@ export const VideoRecorder: React.FC = () => {
       const url = URL.createObjectURL(file);
       if (videoRef.current) {
         videoRef.current.src = url;
+        videoRef.current.srcObject = null; // Clear any existing stream
       }
     }
   };
+
+  // Setup initial webcam preview
+  useEffect(() => {
+    const setupInitialPreview = async () => {
+      try {
+        if (!videoRef.current || videoRef.current.srcObject) return;
+        
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          video: true,
+          audio: false // No audio needed for preview
+        });
+        
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          streamRef.current = stream;
+        }
+      } catch (err) {
+        console.error('Error setting up initial preview:', err);
+      }
+    };
+    
+    setupInitialPreview();
+  }, []);
 
   return (
     <div className="bg-white rounded-lg shadow-lg p-4">
@@ -288,37 +244,34 @@ export const VideoRecorder: React.FC = () => {
           className="w-full h-full object-cover"
         />
         
-        {/* Upload Overlay - shown when no recording/preview is active */}
-        {!isRecording && !videoRef.current?.srcObject && (
-          <div 
-            className="absolute inset-0 bg-black/50 flex items-center justify-center cursor-pointer"
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              e.preventDefault();
-              handleUpload(e);
-            }}
-            onClick={() => document.createElement('input')}
-          >
-            <div className="text-white text-center">
-              <Upload className="w-12 h-12 mx-auto mb-2" />
-              <p className="text-sm">Drop video or click to upload</p>
-            </div>
+        {/* Upload Overlay */}
+        <div 
+          className="absolute inset-0 bg-black/50 opacity-0 hover:opacity-100 
+            transition-opacity flex items-center justify-center cursor-pointer"
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            e.preventDefault();
+            handleUpload(e);
+          }}
+          onClick={() => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = 'video/*';
+            input.onchange = (e) => handleUpload(e as React.ChangeEvent<HTMLInputElement>);
+            input.click();
+          }}
+        >
+          <div className="text-white text-center">
+            <Upload className="w-12 h-12 mx-auto mb-2" />
+            <p className="text-sm">Drop video or click to upload</p>
           </div>
-        )}
+        </div>
 
-        {/* Error Message */}
-        {errorMessage && (
-          <div className="absolute top-2 left-2 right-2 bg-red-500 text-white p-2 rounded-lg flex items-center space-x-2">
-            <AlertCircle className="w-5 h-5" />
-            <span>{errorMessage}</span>
-            <button 
-              onClick={() => setErrorMessage(null)}
-              className="ml-auto p-1 hover:bg-red-600 rounded-full"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        )}
+        {/* Processing Overlay */}
+        <AIProcessingOverlay
+          isVisible={isProcessing}
+          message="Initializing recording..."
+        />
       </div>
 
       {/* Recording Controls */}
@@ -424,17 +377,8 @@ export const VideoRecorder: React.FC = () => {
               className="flex items-center space-x-2 px-6 py-2 bg-[#E44E51] text-white rounded-lg 
                 hover:bg-[#D43B3E] shadow-lg hover:shadow-[#E44E51]/25 disabled:opacity-50"
             >
-              {isProcessing ? (
-                <>
-                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Preparing...</span>
-                </>
-              ) : (
-                <>
-                  <Video className="w-5 h-5" />
-                  <span>Start Recording</span>
-                </>
-              )}
+              <Video className="w-5 h-5" />
+              <span>{isProcessing ? 'Initializing...' : 'Start Recording'}</span>
             </button>
           ) : (
             <button

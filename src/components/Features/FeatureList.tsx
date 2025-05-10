@@ -6,8 +6,6 @@ import { BRoll } from '../Editor/BRoll';
 import { EndCards } from '../Editor/EndCards';
 import { VideoEffects } from '../Effects/VideoEffects';
 import { TransitionEffects } from '../Transitions/TransitionEffects';
-import { IntrosManager } from '../Intros/IntrosManager';
-import { OutrosManager } from '../Outros/OutrosManager';
 
 export const FeatureList: React.FC = () => {
   return (
@@ -42,17 +40,7 @@ export const FeatureList: React.FC = () => {
         </div>
       </div>
 
-      {/* Fourth Row - 2 Columns */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div id="intros">
-          <IntrosManager />
-        </div>
-        <div id="outros">
-          <OutrosManager />
-        </div>
-      </div>
-
-      {/* Fifth Row - 2 Columns */}
+      {/* Fourth Row - 1 Column */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div id="end-cards">
           <EndCards />
