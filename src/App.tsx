@@ -4,6 +4,7 @@ import { VideoPlayback } from './components/Preview/VideoPlayback';
 import { FeatureList } from './components/Features/FeatureList';
 import { AdvancedControls } from './components/Controls/AdvancedControls';
 import { WalkthroughTutorial } from './components/Tutorial/WalkthroughTutorial';
+import { FeatureAssistant } from './components/Assistant/FeatureAssistant';
 import { HelpCircle } from 'lucide-react';
 import './index.css';
 
@@ -61,6 +62,8 @@ function App() {
         isOpen={showTutorial}
         onClose={handleCloseTutorial}
       />
+      
+      <FeatureAssistant />
     </div>
   );
 }
