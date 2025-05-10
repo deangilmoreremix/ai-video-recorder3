@@ -1,8 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { 
-  Crop, Maximize, RefreshCw, Lock, Unlock, 
-  RotateClockwise, Settings, Save, AspectRatio, Fullscreen
-} from 'lucide-react';
+import { Crop, Maximize, RefreshCw, Lock, Unlock, RotateCw as RotateClockwise, Settings, Save, Ratio as AspectRatio, Fullscreen } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 interface SmartCroppingProps {
