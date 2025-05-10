@@ -1,7 +1,7 @@
 import React from 'react';
 import { 
   Camera, Brain, Sparkles, Layout, Focus, CloudFog,
-  Zap, Wind, Palette, Gauge, Eye, Scan
+  Zap, Wind, Palette, Gauge, Eye, Scan, Layers
 } from 'lucide-react';
 import { Tooltip } from '../ui/Tooltip';
 import { motion } from 'framer-motion';
@@ -15,8 +15,12 @@ interface AIFeature {
 
 const featureIcons = {
   faceDetection: Camera,
+  facialLandmarks: Eye,
+  handPoseEstimation: Layout,
+  bodyPoseEstimation: Zap,
+  objectDetection: Scan,
   beautification: Sparkles,
-  backgroundBlur: Layout,
+  backgroundBlur: Layers,
   autoFraming: Focus,
   expressionDetection: Eye,
   enhancedLighting: CloudFog,
@@ -26,6 +30,25 @@ const featureIcons = {
   stabilization: Gauge,
   autoExposure: Zap,
   denoising: Scan
+};
+
+const featureDescriptions = {
+  faceDetection: 'Detect and track faces in real-time',
+  facialLandmarks: 'Identify 468 facial landmark points for precise tracking',
+  handPoseEstimation: 'Track hand positions and gestures',
+  bodyPoseEstimation: 'Track full body positions and movements',
+  objectDetection: 'Identify and track objects in the scene',
+  beautification: 'Enhance facial features automatically',
+  backgroundBlur: 'Blur background while keeping subject in focus',
+  autoFraming: 'Automatically frame and follow subjects',
+  expressionDetection: 'Detect facial expressions and emotions',
+  enhancedLighting: 'Automatically adjust lighting conditions',
+  sceneDetection: 'Detect and optimize for different scenes',
+  noiseReduction: 'Reduce video and audio noise',
+  colorEnhancement: 'Optimize colors and white balance',
+  stabilization: 'Reduce camera shake and motion',
+  autoExposure: 'Dynamic exposure adjustment',
+  denoising: 'Advanced noise reduction'
 };
 
 interface AIFeatureGridProps {
@@ -45,74 +68,74 @@ export const AIFeatureGrid: React.FC<AIFeatureGridProps> = ({
     {
       id: 'faceDetection',
       name: 'Face Detection',
-      description: 'Detect and track faces in real-time',
-      icon: Camera
+      description: featureDescriptions.faceDetection,
+      icon: featureIcons.faceDetection
     },
     {
-      id: 'beautification',
-      name: 'Beautification',
-      description: 'Enhance facial features automatically',
-      icon: Sparkles
+      id: 'facialLandmarks',
+      name: 'Facial Landmarks',
+      description: featureDescriptions.facialLandmarks,
+      icon: featureIcons.facialLandmarks
+    },
+    {
+      id: 'handPoseEstimation',
+      name: 'Hand Tracking',
+      description: featureDescriptions.handPoseEstimation,
+      icon: featureIcons.handPoseEstimation
     },
     {
       id: 'backgroundBlur',
       name: 'Background Blur',
-      description: 'Blur background while keeping subject in focus',
-      icon: Layout
-    },
-    {
-      id: 'autoFraming',
-      name: 'Auto Framing',
-      description: 'Automatically frame and follow subjects',
-      icon: Focus
+      description: featureDescriptions.backgroundBlur,
+      icon: featureIcons.backgroundBlur
     },
     {
       id: 'expressionDetection',
       name: 'Expression Detection',
-      description: 'Detect facial expressions and emotions',
-      icon: Eye
+      description: featureDescriptions.expressionDetection,
+      icon: featureIcons.expressionDetection
     },
     {
       id: 'enhancedLighting',
       name: 'Enhanced Lighting',
-      description: 'Automatically adjust lighting conditions',
-      icon: CloudFog
+      description: featureDescriptions.enhancedLighting,
+      icon: featureIcons.enhancedLighting
     },
     {
-      id: 'sceneDetection',
-      name: 'Scene Detection',
-      description: 'Detect and optimize for different scenes',
-      icon: Brain
+      id: 'objectDetection',
+      name: 'Object Detection',
+      description: featureDescriptions.objectDetection,
+      icon: featureIcons.objectDetection
     },
     {
       id: 'noiseReduction',
       name: 'Noise Reduction',
-      description: 'Reduce video and audio noise',
-      icon: Wind
+      description: featureDescriptions.noiseReduction,
+      icon: featureIcons.noiseReduction
     },
     {
       id: 'colorEnhancement',
       name: 'Color Enhancement',
-      description: 'Optimize colors and white balance',
-      icon: Palette
+      description: featureDescriptions.colorEnhancement,
+      icon: featureIcons.colorEnhancement
     },
     {
       id: 'stabilization',
       name: 'Stabilization',
-      description: 'Reduce camera shake and motion',
-      icon: Gauge
+      description: featureDescriptions.stabilization,
+      icon: featureIcons.stabilization
     },
     {
       id: 'autoExposure',
       name: 'Auto Exposure',
-      description: 'Dynamic exposure adjustment',
-      icon: Zap
+      description: featureDescriptions.autoExposure,
+      icon: featureIcons.autoExposure
     },
     {
       id: 'denoising',
       name: 'Denoising',
-      description: 'Advanced noise reduction',
-      icon: Scan
+      description: featureDescriptions.denoising,
+      icon: featureIcons.denoising
     }
   ];
 
@@ -121,19 +144,21 @@ export const AIFeatureGrid: React.FC<AIFeatureGridProps> = ({
       {aiFeatures.map((feature) => {
         const Icon = feature.icon;
         const isEnabled = features[feature.id]?.enabled;
+        const isDisabled = isProcessing || 
+                          (feature.id === 'facialLandmarks' && !features['faceDetection']?.enabled);
 
         return (
           <Tooltip key={feature.id} content={feature.description}>
             <motion.button
-              onClick={() => onToggleFeature(feature.id)}
-              disabled={isProcessing}
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
+              onClick={() => !isDisabled && onToggleFeature(feature.id)}
+              disabled={isDisabled}
+              whileHover={{ scale: isDisabled ? 1 : 1.02 }}
+              whileTap={{ scale: isDisabled ? 1 : 0.98 }}
               className={`flex flex-col items-center p-4 rounded-lg border transition-all ${
                 isEnabled 
                   ? 'bg-[#E44E51]/10 border-[#E44E51] text-[#E44E51]' 
                   : 'bg-white border-gray-200 hover:border-[#E44E51] hover:bg-[#E44E51]/5'
-              } ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+              } ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               <Icon className="w-6 h-6 mb-2" />
               <span className="text-sm text-center font-medium">{feature.name}</span>
@@ -148,7 +173,11 @@ export const AIFeatureGrid: React.FC<AIFeatureGridProps> = ({
                     sensitivity: parseFloat(e.target.value)
                   })}
                   className="w-full mt-2 accent-[#E44E51]"
+                  onClick={(e) => e.stopPropagation()}
                 />
+              )}
+              {isProcessing && isEnabled && (
+                <div className="mt-2 w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
               )}
             </motion.button>
           </Tooltip>
