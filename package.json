@@ -19,6 +19,7 @@
     "@react-three/fiber": "^8.15.19",
     "@tensorflow-models/blazeface": "^0.1.0",
     "@tensorflow-models/body-segmentation": "^1.0.2",
+    "@tensorflow-models/face-landmarks-detection": "^1.0.2",
     "@tensorflow-models/hand-pose-detection": "^2.0.1",
     "@tensorflow/tfjs": "^4.17.0",
     "clsx": "^2.1.0",
