@@ -11,7 +11,6 @@ import { AIVideoFeatures } from '../AI/AIVideoFeatures';
 import { AIProcessingOverlay } from '../AI/AIProcessingOverlay';
 import { EnhancedDownloadDialog } from './EnhancedDownloadDialog';
 import { Tooltip } from '../ui/Tooltip';
-import { AdvancedFaceRecognition } from '../AI/AdvancedFaceRecognition';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface AudioDevice {
@@ -48,7 +47,7 @@ export const VideoRecorder: React.FC = () => {
   const [showVideoMenu, setShowVideoMenu] = useState(false);
 
   // AI state
-  const [showAIFeatures, setShowAIFeatures] = useState(false);
+  const [showAIFeatures, setShowAIFeatures] = useState(true); // Set to true by default to always show AI features
   const [videoProcessed, setVideoProcessed] = useState(false);
   const [processedVideoUrl, setProcessedVideoUrl] = useState<string | null>(null);
   const [showFullAI, setShowFullAI] = useState(false);
@@ -252,6 +251,7 @@ export const VideoRecorder: React.FC = () => {
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         videoRef.current.muted = true; // Mute to prevent feedback
+        videoRef.current.play();
       }
 
       // Set up media recorder with options for better quality
@@ -409,7 +409,7 @@ export const VideoRecorder: React.FC = () => {
         </div>
       </div>
 
-      <div className="relative aspect-video bg-gray-900 rounded-lg overflow-hidden mb-6">
+      <div className="relative aspect-video bg-gray-900 rounded-lg overflow-hidden mb-4">
         <video
           ref={videoRef}
           autoPlay
@@ -479,14 +479,6 @@ export const VideoRecorder: React.FC = () => {
             <RefreshCw className="w-4 h-4" />
             <span>AI Processing Applied</span>
           </div>
-        )}
-        
-        {/* Face recognition overlay - only show when not recording */}
-        {!isRecording && features.facialLandmarks?.enabled && (
-          <AdvancedFaceRecognition 
-            videoRef={videoRef}
-            enabled={features.facialLandmarks.enabled}
-          />
         )}
       </div>
 
@@ -791,35 +783,24 @@ export const VideoRecorder: React.FC = () => {
           )}
         </AnimatePresence>
 
-        {/* AI Features Panel */}
-        <AnimatePresence>
-          {showAIFeatures && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 'auto', opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              className="overflow-hidden"
+        {/* AI Features Panel - Always shown */}
+        <div className="bg-gray-50 p-4 rounded-lg space-y-4">
+          <div className="flex justify-between items-center">
+            <h4 className="text-sm font-medium">AI Features</h4>
+            <button 
+              onClick={() => setShowFullAI(true)}
+              className="text-sm text-[#E44E51] font-medium"
             >
-              <div className="bg-gray-50 p-4 rounded-lg space-y-4">
-                <div className="flex justify-between items-center">
-                  <h4 className="text-sm font-medium">AI Features</h4>
-                  <button 
-                    onClick={() => setShowFullAI(true)}
-                    className="text-sm text-[#E44E51] font-medium"
-                  >
-                    Advanced Mode
-                  </button>
-                </div>
-                
-                <AIFeatureGrid
-                  features={features}
-                  onToggleFeature={toggleFeature}
-                  isProcessing={isProcessing}
-                />
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+              Advanced Mode
+            </button>
+          </div>
+          
+          <AIFeatureGrid
+            features={features}
+            onToggleFeature={toggleFeature}
+            isProcessing={isProcessing}
+          />
+        </div>
 
         {/* Record Button */}
         <div className="flex justify-center">
