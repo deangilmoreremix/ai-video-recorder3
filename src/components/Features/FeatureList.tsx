@@ -6,16 +6,10 @@ import { BRoll } from '../Editor/BRoll';
 import { EndCards } from '../Editor/EndCards';
 import { VideoEffects } from '../Effects/VideoEffects';
 import { TransitionEffects } from '../Transitions/TransitionEffects';
-import { AdvancedVideoRecorder } from '../Recorder/AdvancedVideoRecorder';
 
 export const FeatureList: React.FC = () => {
   return (
     <div className="space-y-6">
-      {/* First element - Full width */}
-      <div>
-        <AdvancedVideoRecorder />
-      </div>
-      
       {/* First Row - 2 Columns */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div id="silent-removal">
@@ -51,6 +45,8 @@ export const FeatureList: React.FC = () => {
         <div id="end-cards">
           <EndCards />
         </div>
+        {/* Empty column for balance - can be used for future components */}
+        <div></div>
       </div>
     </div>
   );
