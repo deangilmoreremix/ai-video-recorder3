@@ -1,12 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import {
-  Download, Loader, Check, X, Film, ChevronRight, ChevronDown,
-  Youtube, Instagram, Twitter, Facebook, Linkedin, Globe,
-  Settings, Video, Music, Image, Camera, Zap, Save, Send,
-  Crop, Sparkles, Layout, Grid, Maximize2, Eye, Play, Pause,
-  Monitor, Smile, Sliders, SlidersHorizontal, Palette, Wand2,
-  Copy, RotateCcw, Flip, RefreshCw, Sun, Layers, Type, Brush
-} from 'lucide-react';
+import { Download, Loader, Check, X, Film, ChevronRight, ChevronDown, Youtube, Instagram, Twitter, Facebook, Linkedin, Globe, Settings, Video, Music, Image, Camera, Zap, Save, Send, Crop, Sparkles, Layout, Grid, Maximize2, Eye, Play, Pause, Monitor, Smile, Sliders, SlidersHorizontal, Palette, Wand2, Copy, RotateCcw, Eclipse as Flip, RefreshCw, Sun, Layers, Type, Brush } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile } from '@ffmpeg/util';
