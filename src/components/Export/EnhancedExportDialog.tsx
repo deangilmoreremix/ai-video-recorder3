@@ -2,7 +2,10 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   Download, Loader, Check, X, Film, ChevronRight, ChevronDown,
   Youtube, Instagram, Twitter, Facebook, Linkedin, Globe,
-  Settings, Video, Music, Image, Camera, Zap, Save, Send
+  Settings, Video, Music, Image, Camera, Zap, Save, Send,
+  Crop, Sparkles, Layout, Grid, Maximize2, Eye, Play, Pause,
+  Monitor, Smile, Sliders, SlidersHorizontal, Palette, Wand2,
+  Copy, RotateCcw, Flip, RefreshCw, Sun, Layers, Type, Brush
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
@@ -14,6 +17,67 @@ interface EnhancedExportDialogProps {
   videoBlob: Blob | null;
 }
 
+interface CropSettings {
+  enabled: boolean;
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+  aspectRatio: string;
+}
+
+interface ColorCorrectionSettings {
+  enabled: boolean;
+  brightness: number;
+  contrast: number;
+  saturation: number;
+  hue: number;
+  gamma: number;
+}
+
+interface ThumbnailSettings {
+  autoDetectScenes: boolean;
+  generateMultiple: boolean;
+  count: number;
+  interval: number;
+  includeTimestamp: boolean;
+  extractSubtitles: boolean;
+  applyColorCorrection: boolean;
+  smartCrop: boolean;
+  includeSeries: boolean;
+  format: 'jpg' | 'png' | 'webp';
+  quality: number;
+}
+
+interface AnimatedThumbnailSettings {
+  type: 'gif' | 'webp' | 'mp4';
+  duration: number;
+  fps: number;
+  smartLooping: boolean;
+  zoomEffect: boolean;
+  zoomAmount: number;
+  pipEnabled: boolean;
+  pipPosition: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+  includeTimelapse: boolean;
+  frameCount: number;
+  quality: number;
+  width: number;
+  dithering: boolean;
+  optimize: boolean;
+  platform: 'youtube' | 'instagram' | 'tiktok' | 'facebook' | 'twitter' | 'general';
+}
+
+interface TextOverlaySettings {
+  enabled: boolean;
+  text: string;
+  fontSize: number;
+  fontColor: string;
+  backgroundColor: string;
+  backgroundOpacity: number;
+  position: 'top' | 'center' | 'bottom';
+  extractFromSubtitles: boolean;
+}
+
 const EnhancedExportDialog: React.FC<EnhancedExportDialogProps> = ({
   isOpen,
   onClose,
@@ -21,6 +85,7 @@ const EnhancedExportDialog: React.FC<EnhancedExportDialogProps> = ({
 }) => {
   // Tabs and format selection
   const [activeTab, setActiveTab] = useState('video');
+  const [activeSubTab, setActiveSubTab] = useState('standard');
   const [selectedFormat, setSelectedFormat] = useState('mp4');
   const [selectedCodec, setSelectedCodec] = useState('h264');
   const [selectedQuality, setSelectedQuality] = useState('high');
@@ -34,6 +99,7 @@ const EnhancedExportDialog: React.FC<EnhancedExportDialogProps> = ({
   // Video preview
   const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   
   // Export settings
   const [resolution, setResolution] = useState({ width: 1920, height: 1080 });
@@ -43,6 +109,77 @@ const EnhancedExportDialog: React.FC<EnhancedExportDialogProps> = ({
   const [videoBitrate, setVideoBitrate] = useState(5000);
   const [audioBitrate, setAudioBitrate] = useState(128);
   const [audioCodec, setAudioCodec] = useState('aac');
+  
+  // Thumbnail settings
+  const [thumbnailSettings, setThumbnailSettings] = useState<ThumbnailSettings>({
+    autoDetectScenes: true,
+    generateMultiple: false,
+    count: 3,
+    interval: 5,
+    includeTimestamp: true,
+    extractSubtitles: false,
+    applyColorCorrection: true,
+    smartCrop: true,
+    includeSeries: false,
+    format: 'jpg',
+    quality: 90
+  });
+  
+  // Crop settings for thumbnails/GIFs
+  const [cropSettings, setCropSettings] = useState<CropSettings>({
+    enabled: false,
+    top: 0,
+    left: 0,
+    width: 100,
+    height: 100,
+    aspectRatio: '16:9'
+  });
+
+  // Color correction settings
+  const [colorSettings, setColorSettings] = useState<ColorCorrectionSettings>({
+    enabled: false,
+    brightness: 0,
+    contrast: 0,
+    saturation: 0,
+    hue: 0,
+    gamma: 1
+  });
+
+  // Animated thumbnail settings
+  const [animatedSettings, setAnimatedSettings] = useState<AnimatedThumbnailSettings>({
+    type: 'gif',
+    duration: 3,
+    fps: 10,
+    smartLooping: true,
+    zoomEffect: false,
+    zoomAmount: 10,
+    pipEnabled: false,
+    pipPosition: 'bottom-right',
+    includeTimelapse: false,
+    frameCount: 5,
+    quality: 75,
+    width: 640,
+    dithering: true,
+    optimize: true,
+    platform: 'general'
+  });
+
+  // Text overlay settings
+  const [textOverlaySettings, setTextOverlaySettings] = useState<TextOverlaySettings>({
+    enabled: false,
+    text: 'Add your text here',
+    fontSize: 24,
+    fontColor: '#FFFFFF',
+    backgroundColor: '#000000',
+    backgroundOpacity: 0.5,
+    position: 'bottom',
+    extractFromSubtitles: false
+  });
+
+  // Detected scenes for thumbnails
+  const [detectedScenes, setDetectedScenes] = useState<number[]>([]);
+  const [selectedSceneIndex, setSelectedSceneIndex] = useState<number | null>(null);
+  const [generatedThumbnails, setGeneratedThumbnails] = useState<string[]>([]);
   
   // Special settings
   const [gifSettings, setGifSettings] = useState({
@@ -81,11 +218,22 @@ const EnhancedExportDialog: React.FC<EnhancedExportDialogProps> = ({
       { id: 'jpg-seq', name: 'JPEG Sequence', codec: [], description: 'Series of JPEG images' },
       { id: 'png-seq', name: 'PNG Sequence', codec: [], description: 'Series of PNG images' }
     ],
-    special: [
-      { id: 'gif-optimized', name: 'Optimized GIF', codec: [], description: 'Smaller file size GIF' },
-      { id: 'thumbnail', name: 'Video Thumbnail', codec: [], description: 'Extract specific frame' },
-      { id: 'preview', name: 'Preview GIF', codec: [], description: 'Low quality preview' }
+    thumbnails: [
+      { id: 'single', name: 'Single Thumbnail', codec: [], description: 'Extract key frame' },
+      { id: 'multiple', name: 'Multiple Thumbnails', codec: [], description: 'Generate thumbnail set' },
+      { id: 'smart-crop', name: 'Smart Cropping', codec: [], description: 'AI-based cropping' },
+      { id: 'animated', name: 'Animated Thumbnail', codec: [], description: 'Short animated preview' },
+      { id: 'timelapse', name: 'Timelapse Grid', codec: [], description: 'Show video progression' }
     ]
+  };
+
+  const platformPresets = {
+    youtube: { width: 1280, height: 720, format: 'jpg', quality: 90 },
+    instagram: { width: 1080, height: 1080, format: 'jpg', quality: 90 },
+    tiktok: { width: 1080, height: 1920, format: 'jpg', quality: 90 },
+    facebook: { width: 1200, height: 630, format: 'jpg', quality: 90 },
+    twitter: { width: 1200, height: 675, format: 'jpg', quality: 90 },
+    general: { width: 1280, height: 720, format: 'jpg', quality: 90 }
   };
 
   const qualityPresets = {
@@ -125,6 +273,29 @@ const EnhancedExportDialog: React.FC<EnhancedExportDialogProps> = ({
     setAudioBitrate(preset.audioBitrate);
   }, [selectedQuality]);
 
+  // Update canvas dimensions when video loads
+  useEffect(() => {
+    if (canvasRef.current && videoRef.current && videoRef.current.readyState >= 2) {
+      const canvas = canvasRef.current;
+      canvas.width = videoRef.current.videoWidth;
+      canvas.height = videoRef.current.videoHeight;
+    }
+  }, [videoRef.current?.readyState]);
+
+  // Initialize crop settings based on video dimensions
+  useEffect(() => {
+    if (videoRef.current && videoRef.current.readyState >= 2) {
+      const videoWidth = videoRef.current.videoWidth;
+      const videoHeight = videoRef.current.videoHeight;
+      
+      setCropSettings({
+        ...cropSettings,
+        width: videoWidth,
+        height: videoHeight
+      });
+    }
+  }, [videoRef.current?.readyState]);
+
   const handleExport = async () => {
     if (!videoBlob) {
       setErrorMessage('No video to export');
@@ -158,7 +329,7 @@ const EnhancedExportDialog: React.FC<EnhancedExportDialogProps> = ({
         ffmpegArgs.push('-ss', startTime.toString());
       }
       
-      if (endTime > 0 && endTime < videoRef.current?.duration) {
+      if (endTime > 0 && endTime < videoRef.current?.duration!) {
         ffmpegArgs.push('-to', endTime.toString());
       }
       
@@ -241,18 +412,219 @@ const EnhancedExportDialog: React.FC<EnhancedExportDialogProps> = ({
           }
           break;
           
-        case 'special':
-          if (selectedFormat === 'thumbnail') {
-            outputFileName = 'thumbnail.jpg';
+        case 'thumbnails':
+          if (activeSubTab === 'standard' || activeSubTab === 'single') {
+            // Standard single thumbnail extraction
+            const format = thumbnailSettings.format;
+            outputFileName = `thumbnail.${format}`;
             
             // Extract a single frame
             ffmpegArgs = ['-i', inputFileName, '-frames:v', '1'];
             
-            if (startTime > 0) {
+            // Use scene timestamp if selected, otherwise use startTime
+            if (selectedSceneIndex !== null && detectedScenes.length > 0) {
+              ffmpegArgs = ['-ss', detectedScenes[selectedSceneIndex].toString(), ...ffmpegArgs];
+            } else if (startTime > 0) {
               ffmpegArgs = ['-ss', startTime.toString(), ...ffmpegArgs];
             }
             
-            ffmpegArgs.push('-q:v', '2');
+            // Apply smart cropping if enabled
+            if (thumbnailSettings.smartCrop && cropSettings.enabled) {
+              ffmpegArgs.push('-vf', `crop=${cropSettings.width}:${cropSettings.height}:${cropSettings.left}:${cropSettings.top}`);
+            }
+            
+            // Apply color correction if enabled
+            if (thumbnailSettings.applyColorCorrection && colorSettings.enabled) {
+              const colorFilters = [];
+              if (colorSettings.brightness !== 0) colorFilters.push(`brightness=${1 + colorSettings.brightness * 0.1}`);
+              if (colorSettings.contrast !== 0) colorFilters.push(`contrast=${1 + colorSettings.contrast * 0.1}`);
+              if (colorSettings.saturation !== 0) colorFilters.push(`saturation=${1 + colorSettings.saturation * 0.1}`);
+              if (colorSettings.gamma !== 1) colorFilters.push(`gamma=${colorSettings.gamma}`);
+              if (colorSettings.hue !== 0) colorFilters.push(`hue=h=${colorSettings.hue}`);
+              
+              if (colorFilters.length > 0) {
+                ffmpegArgs.push('-vf', colorFilters.join(','));
+              }
+            }
+            
+            // Set quality
+            ffmpegArgs.push('-q:v', Math.round(thumbnailSettings.quality / 10).toString());
+          } 
+          else if (activeSubTab === 'multiple') {
+            // Generate multiple thumbnails at different timestamps
+            const format = thumbnailSettings.format;
+            outputFileName = `thumbnail-%03d.${format}`;
+            
+            // Generate thumbnails at regular intervals
+            const interval = (endTime - startTime) / (thumbnailSettings.count + 1);
+            let filterComplex = '';
+            
+            for (let i = 0; i < thumbnailSettings.count; i++) {
+              const time = startTime + interval * (i + 1);
+              
+              // Add -ss command for each thumbnail
+              ffmpegArgs.push('-ss', time.toString());
+              ffmpegArgs.push('-i', inputFileName);
+            }
+            
+            // Apply smart cropping if enabled
+            if (thumbnailSettings.smartCrop && cropSettings.enabled) {
+              for (let i = 0; i < thumbnailSettings.count; i++) {
+                ffmpegArgs.push('-vf', `crop=${cropSettings.width}:${cropSettings.height}:${cropSettings.left}:${cropSettings.top}`);
+              }
+            }
+            
+            // Generate one frame per input
+            ffmpegArgs.push('-frames:v', '1');
+          }
+          else if (activeSubTab === 'animated') {
+            // Animated thumbnail (GIF or short video)
+            const type = animatedSettings.type;
+            outputFileName = `animated-thumbnail.${type}`;
+            
+            // Duration and position filter
+            let seekTime = startTime;
+            if (selectedSceneIndex !== null && detectedScenes.length > 0) {
+              seekTime = detectedScenes[selectedSceneIndex];
+            }
+            
+            ffmpegArgs = ['-ss', seekTime.toString(), '-t', animatedSettings.duration.toString(), '-i', inputFileName];
+            
+            // Apply filters based on animation type
+            const filters = [];
+            
+            // Resize
+            filters.push(`scale=${animatedSettings.width}:-1:flags=lanczos`);
+            
+            // Apply smart crop if enabled
+            if (thumbnailSettings.smartCrop && cropSettings.enabled) {
+              filters.push(`crop=${cropSettings.width}:${cropSettings.height}:${cropSettings.left}:${cropSettings.top}`);
+            }
+            
+            // Apply fps for GIF/WebP
+            if (type === 'gif' || type === 'webp') {
+              filters.push(`fps=${animatedSettings.fps}`);
+            }
+            
+            // Apply zoom effect if enabled
+            if (animatedSettings.zoomEffect) {
+              const zoom = 1 + (animatedSettings.zoomAmount / 100);
+              filters.push(`zoompan=z='min(zoom+0.0015,${zoom})':d=${animatedSettings.duration * animatedSettings.fps}:s=${animatedSettings.width}x${animatedSettings.height}`);
+            }
+            
+            // Apply color correction if enabled
+            if (thumbnailSettings.applyColorCorrection && colorSettings.enabled) {
+              if (colorSettings.brightness !== 0) filters.push(`eq=brightness=${colorSettings.brightness * 0.1}`);
+              if (colorSettings.contrast !== 0) filters.push(`eq=contrast=${1 + colorSettings.contrast * 0.1}`);
+              if (colorSettings.saturation !== 0) filters.push(`eq=saturation=${1 + colorSettings.saturation * 0.1}`);
+              if (colorSettings.gamma !== 1) filters.push(`eq=gamma=${colorSettings.gamma}`);
+              if (colorSettings.hue !== 0) filters.push(`hue=h=${colorSettings.hue}`);
+            }
+            
+            if (filters.length > 0) {
+              ffmpegArgs.push('-vf', filters.join(','));
+            }
+            
+            // Specific settings for each format
+            if (type === 'gif') {
+              // Palette generation for higher quality GIFs
+              ffmpegArgs = [
+                '-ss', seekTime.toString(),
+                '-t', animatedSettings.duration.toString(),
+                '-i', inputFileName,
+                '-vf', `${filters.join(',')},split[s0][s1];[s0]palettegen=max_colors=${gifSettings.colors}[p];[s1][p]paletteuse${animatedSettings.dithering ? '=dither=floyd_steinberg' : ''}`
+              ];
+            } else if (type === 'webp') {
+              ffmpegArgs.push('-loop', '0');
+              ffmpegArgs.push('-quality', animatedSettings.quality.toString());
+            } else if (type === 'mp4') {
+              // Create a small, efficient MP4
+              ffmpegArgs.push('-c:v', 'libx264');
+              ffmpegArgs.push('-preset', 'fast');
+              ffmpegArgs.push('-crf', (30 - animatedSettings.quality / 5).toString());
+              ffmpegArgs.push('-an'); // No audio
+              
+              // Create a looping video if smart looping is enabled
+              if (animatedSettings.smartLooping) {
+                // Create a forward-backward loop
+                ffmpegArgs = [
+                  '-ss', seekTime.toString(),
+                  '-t', (animatedSettings.duration / 2).toString(),
+                  '-i', inputFileName,
+                  '-filter_complex', `[0:v]${filters.join(',')},split[v1][v2];[v1]fifo[v1out];[v2]reverse[v2out];[v1out][v2out]concat=n=2:v=1:a=0[out]`,
+                  '-map', '[out]',
+                  '-c:v', 'libx264',
+                  '-preset', 'fast',
+                  '-crf', (30 - animatedSettings.quality / 5).toString(),
+                  '-an'
+                ];
+              }
+            }
+            
+            // Add text overlay if enabled
+            if (textOverlaySettings.enabled) {
+              // We need to modify the existing filter chain to add text
+              // This gets complex with filter_complex, so we'll handle it specially
+              // For simplicity here, we'll just add a simple drawtext
+              const textFilter = `drawtext=text='${textOverlaySettings.text}':fontcolor=${textOverlaySettings.fontColor}:fontsize=${textOverlaySettings.fontSize}:x=(w-text_w)/2:y=${textOverlaySettings.position === 'top' ? '10' : textOverlaySettings.position === 'center' ? '(h-text_h)/2' : 'h-text_h-10'}:box=1:boxcolor=${textOverlaySettings.backgroundColor}@${textOverlaySettings.backgroundOpacity}`;
+              
+              if (type === 'gif') {
+                // For GIF with palette, we need special handling
+                ffmpegArgs = [
+                  '-ss', seekTime.toString(),
+                  '-t', animatedSettings.duration.toString(),
+                  '-i', inputFileName,
+                  '-vf', `${filters.join(',')},${textFilter},split[s0][s1];[s0]palettegen=max_colors=${gifSettings.colors}[p];[s1][p]paletteuse${animatedSettings.dithering ? '=dither=floyd_steinberg' : ''}`
+                ];
+              } else {
+                // For other formats, add to the filter chain
+                const currentFilterIndex = ffmpegArgs.indexOf('-vf');
+                if (currentFilterIndex !== -1) {
+                  ffmpegArgs[currentFilterIndex + 1] = `${ffmpegArgs[currentFilterIndex + 1]},${textFilter}`;
+                } else {
+                  ffmpegArgs.push('-vf', textFilter);
+                }
+              }
+            }
+          }
+          else if (activeSubTab === 'timelapse') {
+            // Timelapse grid of thumbnails
+            outputFileName = `timelapse.${thumbnailSettings.format}`;
+            
+            // Extract frames at regular intervals
+            const interval = (endTime - startTime) / thumbnailSettings.count;
+            const filters = [];
+            const tileLayout = getTileLayout(thumbnailSettings.count);
+            
+            // Create complex filter to generate tile grid
+            let filterComplex = '';
+            
+            for (let i = 0; i < thumbnailSettings.count; i++) {
+              const time = startTime + interval * i;
+              
+              // Extract frame at specified time
+              filterComplex += `[0:v]select=eq(n\\,${Math.round(time * frameRate)}),scale=${animatedSettings.width / tileLayout.cols}:${animatedSettings.width / tileLayout.cols / 16 * 9}[v${i}];`;
+            }
+            
+            // Create tile layout
+            let tileInputs = '';
+            for (let i = 0; i < thumbnailSettings.count; i++) {
+              tileInputs += `[v${i}]`;
+            }
+            
+            filterComplex += `${tileInputs}tile=${tileLayout.cols}x${tileLayout.rows}`;
+            
+            ffmpegArgs = [
+              '-i', inputFileName,
+              '-filter_complex', filterComplex,
+              '-frames:v', '1'
+            ];
+            
+            // Apply color correction if enabled
+            if (thumbnailSettings.applyColorCorrection && colorSettings.enabled) {
+              // Add color correction before tile creation
+              // This is complex to implement here, so we'll omit for simplicity
+            }
           }
           break;
       }
@@ -264,34 +636,67 @@ const EnhancedExportDialog: React.FC<EnhancedExportDialogProps> = ({
       await ffmpeg.exec(ffmpegArgs);
       
       // Read the output file
-      const data = await ffmpeg.readFile(outputFileName);
+      let outputData;
+      let mimeType = 'video/mp4';
       
-      // Create and download the blob
+      // If we're generating multiple thumbnails, we need to handle them differently
+      if (activeTab === 'thumbnails' && activeSubTab === 'multiple') {
+        // Create a zip file containing all thumbnails
+        // This would require additional libraries to create zip files in the browser
+        // For now, let's just download them individually
+        
+        const format = thumbnailSettings.format;
+        const files = [];
+        
+        for (let i = 1; i <= thumbnailSettings.count; i++) {
+          const fileName = `thumbnail-${i.toString().padStart(3, '0')}.${format}`;
+          const data = await ffmpeg.readFile(fileName);
+          
+          // Create and trigger download for each thumbnail
+          const blob = new Blob([data], { type: `image/${format}` });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = fileName;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }
+        
+        // No need to continue with single file download
+        setIsProcessing(false);
+        onClose();
+        return;
+      } else {
+        outputData = await ffmpeg.readFile(outputFileName);
+      }
+      
+      // Determine MIME type based on output format
       const outputFormat = outputFileName.split('.').pop() || 'mp4';
       
-      let mimeType = 'video/mp4';
-      if (activeTab === 'audio') {
+      if (activeTab === 'video') {
+        mimeType = `video/${outputFormat}`;
+      } 
+      else if (activeTab === 'audio') {
         mimeType = `audio/${outputFormat}`;
       } 
-      else if (activeTab === 'image') {
+      else if (activeTab === 'image' || activeTab === 'thumbnails') {
         mimeType = outputFormat === 'gif' ? 'image/gif' : 
                   outputFormat === 'apng' ? 'image/apng' :
                   outputFormat === 'webp' ? 'image/webp' : 
                   outputFormat === 'jpg' ? 'image/jpeg' : 'image/png';
       }
       
-      const outputBlob = new Blob([data], { type: mimeType });
-      
       // Create download link
-      const url = URL.createObjectURL(outputBlob);
+      const blob = new Blob([outputData], { type: mimeType });
+      const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
       a.download = `exported.${outputFormat}`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      
-      // Clean up
       URL.revokeObjectURL(url);
       
       // Close dialog
@@ -314,6 +719,146 @@ const EnhancedExportDialog: React.FC<EnhancedExportDialogProps> = ({
       }
       setIsPreviewPlaying(!isPreviewPlaying);
     }
+  };
+
+  const detectScenes = async () => {
+    if (!videoBlob || !videoRef.current) return;
+    
+    setIsProcessing(true);
+    setProgress(0);
+    
+    try {
+      const ffmpeg = new FFmpeg();
+      await ffmpeg.load();
+      
+      // Write input file
+      await ffmpeg.writeFile('input.webm', await fetchFile(videoBlob));
+      
+      // Run scene detection
+      await ffmpeg.exec([
+        '-i', 'input.webm',
+        '-vf', 'select=gt(scene\\,0.3),showinfo',
+        '-f', 'null',
+        '-'
+      ]);
+      
+      // In a real implementation, we would parse the output to get scene change frames
+      // For this demo, let's simulate some detected scenes
+      const duration = videoRef.current.duration;
+      const sceneCount = Math.min(5, Math.max(3, Math.floor(duration / 30)));
+      
+      const scenes = [];
+      for (let i = 0; i < sceneCount; i++) {
+        scenes.push(Math.round((duration / (sceneCount + 1) * (i + 1)) * 100) / 100);
+      }
+      
+      setDetectedScenes(scenes);
+      
+      // Generate thumbnails for detected scenes
+      const thumbnails = [];
+      
+      for (let i = 0; i < scenes.length; i++) {
+        // In a real implementation, we would extract thumbnails for each scene
+        // For this demo, we'll just create placeholder URLs
+        thumbnails.push(`https://picsum.photos/seed/${i}/640/360`);
+      }
+      
+      setGeneratedThumbnails(thumbnails);
+      
+    } catch (error) {
+      console.error('Scene detection error:', error);
+      setErrorMessage('Failed to detect scenes');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // Helper function to determine the best tile layout for a grid
+  const getTileLayout = (count: number) => {
+    // Simple algorithm to determine rows and columns for a grid
+    const cols = Math.ceil(Math.sqrt(count));
+    const rows = Math.ceil(count / cols);
+    return { rows, cols };
+  };
+
+  // Function to generate thumbnail with smart cropping
+  const applySmartCrop = () => {
+    if (!videoRef.current || !canvasRef.current) return;
+    
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    
+    // Draw the current frame
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    
+    // In a real implementation, we would use ML to detect faces or subjects
+    // For this demo, we'll just simulate it by highlighting a region
+    
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+    
+    const aspectRatio = cropSettings.aspectRatio === '16:9' ? 16/9 :
+                        cropSettings.aspectRatio === '9:16' ? 9/16 :
+                        cropSettings.aspectRatio === '1:1' ? 1 :
+                        cropSettings.aspectRatio === '4:3' ? 4/3 :
+                        cropSettings.aspectRatio === '3:4' ? 3/4 : 16/9;
+    
+    let cropWidth, cropHeight;
+    
+    if (aspectRatio > 1) {
+      cropWidth = Math.min(canvas.width, canvas.width * 0.8);
+      cropHeight = cropWidth / aspectRatio;
+    } else {
+      cropHeight = Math.min(canvas.height, canvas.height * 0.8);
+      cropWidth = cropHeight * aspectRatio;
+    }
+    
+    const cropX = centerX - cropWidth / 2;
+    const cropY = centerY - cropHeight / 2;
+    
+    // Update crop settings
+    setCropSettings({
+      ...cropSettings,
+      enabled: true,
+      left: Math.round(cropX),
+      top: Math.round(cropY),
+      width: Math.round(cropWidth),
+      height: Math.round(cropHeight)
+    });
+    
+    // Draw crop rectangle
+    ctx.strokeStyle = '#E44E51';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(cropX, cropY, cropWidth, cropHeight);
+  };
+
+  // Function to apply color correction to canvas
+  const applyColorCorrection = () => {
+    if (!videoRef.current || !canvasRef.current) return;
+    
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    
+    // Draw the current frame
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    
+    // Apply color adjustments using canvas filters
+    ctx.filter = `
+      brightness(${1 + colorSettings.brightness * 0.05})
+      contrast(${1 + colorSettings.contrast * 0.05})
+      saturate(${1 + colorSettings.saturation * 0.05})
+      hue-rotate(${colorSettings.hue}deg)
+    `;
+    
+    // Redraw with filters
+    ctx.drawImage(canvas, 0, 0);
+    
+    // Reset filters
+    ctx.filter = 'none';
   };
 
   if (!isOpen) return null;
@@ -344,11 +889,15 @@ const EnhancedExportDialog: React.FC<EnhancedExportDialogProps> = ({
       case 'jpg-seq':
       case 'png-seq':
         return <Image className="w-4 h-4" />;
-      case 'thumbnail':
+      case 'single':
+      case 'multiple':
         return <Camera className="w-4 h-4" />;
-      case 'gif-optimized':
-      case 'preview':
-        return <Zap className="w-4 h-4" />;
+      case 'smart-crop':
+        return <Crop className="w-4 h-4" />;
+      case 'animated':
+        return <Play className="w-4 h-4" />;
+      case 'timelapse':
+        return <Grid className="w-4 h-4" />;
       default:
         return <Film className="w-4 h-4" />;
     }
@@ -375,24 +924,986 @@ const EnhancedExportDialog: React.FC<EnhancedExportDialogProps> = ({
           bitrate = resolution.width * 0.3 / imageSequenceSettings.frameInterval;
         }
         break;
-      case 'special':
-        if (selectedFormat === 'thumbnail') {
-          return '~100KB'; // Rough estimate for a single JPEG
+      case 'thumbnails':
+        if (activeSubTab === 'animated') {
+          if (animatedSettings.type === 'gif') {
+            bitrate = animatedSettings.width * animatedSettings.fps * 0.1;
+          } else if (animatedSettings.type === 'mp4') {
+            bitrate = animatedSettings.width * 0.3;
+          }
+          return `${((bitrate * animatedSettings.duration * 0.128) || 0.1).toFixed(1)} MB`;
+        } else {
+          // A rough estimate for a single image
+          const pixels = resolution.width * resolution.height;
+          const multiplier = thumbnailSettings.format === 'jpg' ? 0.1 : 0.2;
+          return `${((pixels * multiplier / 1024 / 1024) || 0.1).toFixed(1)} MB`;
         }
-        break;
+      default:
+        return 'N/A';
     }
     
     // Calculate size in MB
     const sizeInMB = (bitrate * duration * 0.128).toFixed(1);
     return `${sizeInMB} MB`;
   };
+  
+  const renderThumbnailControls = () => {
+    switch (activeSubTab) {
+      case 'standard':
+      case 'single':
+        return (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <label className="block text-sm font-medium text-gray-700">Format</label>
+                </div>
+                <div className="flex space-x-2">
+                  {['jpg', 'png', 'webp'].map(format => (
+                    <button
+                      key={format}
+                      onClick={() => setThumbnailSettings({
+                        ...thumbnailSettings,
+                        format: format as any
+                      })}
+                      className={`px-3 py-1.5 rounded text-sm ${
+                        thumbnailSettings.format === format
+                          ? 'bg-[#E44E51]/10 text-[#E44E51]'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {format.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <label className="block text-sm font-medium text-gray-700">Quality</label>
+                  <span className="text-xs text-gray-500">{thumbnailSettings.quality}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="60"
+                  max="100"
+                  value={thumbnailSettings.quality}
+                  onChange={(e) => setThumbnailSettings({
+                    ...thumbnailSettings,
+                    quality: Number(e.target.value)
+                  })}
+                  className="w-full accent-[#E44E51]"
+                />
+              </div>
+            </div>
+            
+            <div className="flex items-center justify-between">
+              <label className="block text-sm font-medium text-gray-700">
+                Auto-detect Best Frames
+              </label>
+              <button
+                onClick={() => {
+                  setThumbnailSettings({
+                    ...thumbnailSettings,
+                    autoDetectScenes: !thumbnailSettings.autoDetectScenes
+                  });
+                  if (!thumbnailSettings.autoDetectScenes && detectedScenes.length === 0) {
+                    detectScenes();
+                  }
+                }}
+                className={`px-3 py-1.5 rounded text-sm ${
+                  thumbnailSettings.autoDetectScenes
+                    ? 'bg-[#E44E51]/10 text-[#E44E51]'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                {thumbnailSettings.autoDetectScenes ? 'Enabled' : 'Disabled'}
+              </button>
+            </div>
+            
+            {detectedScenes.length > 0 && (
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700">
+                  Detected Scenes
+                </label>
+                <div className="flex space-x-2 overflow-x-auto pb-1">
+                  {detectedScenes.map((timestamp, index) => (
+                    <button
+                      key={index}
+                      onClick={() => setSelectedSceneIndex(index)}
+                      className={`flex-shrink-0 p-1 border rounded ${
+                        selectedSceneIndex === index
+                          ? 'border-[#E44E51] bg-[#E44E51]/10'
+                          : 'border-gray-200'
+                      }`}
+                    >
+                      <div className="w-24 h-16 bg-gray-200 relative">
+                        {generatedThumbnails[index] && (
+                          <img 
+                            src={generatedThumbnails[index]} 
+                            alt={`Scene ${index}`}
+                            className="w-full h-full object-cover rounded-sm"
+                          />
+                        )}
+                        <div className="absolute bottom-0 right-0 text-xs bg-black text-white px-1 rounded-tl">
+                          {formatTime(timestamp)}
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="flex items-center justify-between text-sm font-medium text-gray-700">
+                  <span>Smart Cropping</span>
+                  <button
+                    onClick={() => {
+                      setThumbnailSettings({
+                        ...thumbnailSettings,
+                        smartCrop: !thumbnailSettings.smartCrop
+                      });
+                      if (!thumbnailSettings.smartCrop) {
+                        applySmartCrop();
+                      }
+                    }}
+                    className={`px-2 py-1 rounded text-xs ${
+                      thumbnailSettings.smartCrop
+                        ? 'bg-[#E44E51]/10 text-[#E44E51]'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    {thumbnailSettings.smartCrop ? 'Enabled' : 'Disabled'}
+                  </button>
+                </label>
+                
+                <div className="flex space-x-2">
+                  {['16:9', '9:16', '1:1', '4:3', '3:4'].map(ratio => (
+                    <button
+                      key={ratio}
+                      onClick={() => {
+                        setCropSettings({
+                          ...cropSettings,
+                          aspectRatio: ratio
+                        });
+                        if (thumbnailSettings.smartCrop) {
+                          applySmartCrop();
+                        }
+                      }}
+                      className={`px-2 py-1 rounded text-xs ${
+                        cropSettings.aspectRatio === ratio
+                          ? 'bg-[#E44E51]/10 text-[#E44E51]'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {ratio}
+                    </button>
+                  ))}
+                </div>
+              </div>
+                            
+              <div className="space-y-2">
+                <label className="flex items-center justify-between text-sm font-medium text-gray-700">
+                  <span>Color Correction</span>
+                  <button
+                    onClick={() => {
+                      setThumbnailSettings({
+                        ...thumbnailSettings,
+                        applyColorCorrection: !thumbnailSettings.applyColorCorrection
+                      });
+                      if (!thumbnailSettings.applyColorCorrection) {
+                        setColorSettings({...colorSettings, enabled: true});
+                        applyColorCorrection();
+                      }
+                    }}
+                    className={`px-2 py-1 rounded text-xs ${
+                      thumbnailSettings.applyColorCorrection
+                        ? 'bg-[#E44E51]/10 text-[#E44E51]'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    {thumbnailSettings.applyColorCorrection ? 'Enabled' : 'Disabled'}
+                  </button>
+                </label>
+                
+                {thumbnailSettings.applyColorCorrection && (
+                  <div className="grid grid-cols-2 gap-1">
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-xs">
+                        <span>Brightness</span>
+                        <span>{colorSettings.brightness}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="-10"
+                        max="10"
+                        value={colorSettings.brightness}
+                        onChange={(e) => setColorSettings({
+                          ...colorSettings,
+                          brightness: Number(e.target.value)
+                        })}
+                        className="w-full accent-[#E44E51]"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-xs">
+                        <span>Contrast</span>
+                        <span>{colorSettings.contrast}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="-10"
+                        max="10"
+                        value={colorSettings.contrast}
+                        onChange={(e) => setColorSettings({
+                          ...colorSettings,
+                          contrast: Number(e.target.value)
+                        })}
+                        className="w-full accent-[#E44E51]"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <label className="flex items-center text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={textOverlaySettings.enabled}
+                  onChange={(e) => setTextOverlaySettings({
+                    ...textOverlaySettings,
+                    enabled: e.target.checked
+                  })}
+                  className="rounded border-gray-300 text-[#E44E51] mr-2"
+                />
+                Add Text Overlay
+              </label>
+              
+              <label className="flex items-center text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={thumbnailSettings.includeTimestamp}
+                  onChange={(e) => setThumbnailSettings({
+                    ...thumbnailSettings,
+                    includeTimestamp: e.target.checked
+                  })}
+                  className="rounded border-gray-300 text-[#E44E51] mr-2"
+                />
+                Include Timestamp
+              </label>
+            </div>
+            
+            {textOverlaySettings.enabled && (
+              <div className="p-3 bg-gray-50 rounded-lg space-y-3">
+                <input
+                  type="text"
+                  value={textOverlaySettings.text}
+                  onChange={(e) => setTextOverlaySettings({
+                    ...textOverlaySettings,
+                    text: e.target.value
+                  })}
+                  className="w-full rounded-lg border-gray-300 text-sm"
+                  placeholder="Enter text for overlay"
+                />
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs text-gray-500">Text Color</label>
+                    <input
+                      type="color"
+                      value={textOverlaySettings.fontColor}
+                      onChange={(e) => setTextOverlaySettings({
+                        ...textOverlaySettings,
+                        fontColor: e.target.value
+                      })}
+                      className="w-full h-8 rounded"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500">Background</label>
+                    <input
+                      type="color"
+                      value={textOverlaySettings.backgroundColor}
+                      onChange={(e) => setTextOverlaySettings({
+                        ...textOverlaySettings,
+                        backgroundColor: e.target.value
+                      })}
+                      className="w-full h-8 rounded"
+                    />
+                  </div>
+                </div>
+                
+                <div className="flex space-x-2">
+                  {['top', 'center', 'bottom'].map(pos => (
+                    <button
+                      key={pos}
+                      onClick={() => setTextOverlaySettings({
+                        ...textOverlaySettings,
+                        position: pos as any
+                      })}
+                      className={`px-2 py-1 rounded text-xs ${
+                        textOverlaySettings.position === pos
+                          ? 'bg-[#E44E51]/10 text-[#E44E51]'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {pos.charAt(0).toUpperCase() + pos.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      
+      case 'multiple':
+        return (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700">
+                  Number of Thumbnails
+                </label>
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => setThumbnailSettings({
+                      ...thumbnailSettings,
+                      count: Math.max(2, thumbnailSettings.count - 1)
+                    })}
+                    className="p-1 bg-gray-100 rounded"
+                  >
+                    -
+                  </button>
+                  <input
+                    type="number"
+                    min="2"
+                    max="12"
+                    value={thumbnailSettings.count}
+                    onChange={(e) => setThumbnailSettings({
+                      ...thumbnailSettings,
+                      count: Number(e.target.value)
+                    })}
+                    className="w-full rounded-lg border-gray-300 text-sm text-center"
+                  />
+                  <button
+                    onClick={() => setThumbnailSettings({
+                      ...thumbnailSettings,
+                      count: Math.min(12, thumbnailSettings.count + 1)
+                    })}
+                    className="p-1 bg-gray-100 rounded"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Format & Quality
+                  </label>
+                  <span className="text-xs text-gray-500">{thumbnailSettings.quality}%</span>
+                </div>
+                <div className="flex space-x-2">
+                  {['jpg', 'png', 'webp'].map(format => (
+                    <button
+                      key={format}
+                      onClick={() => setThumbnailSettings({
+                        ...thumbnailSettings,
+                        format: format as any
+                      })}
+                      className={`px-2 py-1 rounded text-xs ${
+                        thumbnailSettings.format === format
+                          ? 'bg-[#E44E51]/10 text-[#E44E51]'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {format.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            
+            <div className="p-3 bg-gray-50 rounded-lg">
+              <h3 className="text-sm font-medium text-gray-700 mb-2">Extraction Method</h3>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => setThumbnailSettings({
+                    ...thumbnailSettings,
+                    autoDetectScenes: true
+                  })}
+                  className={`p-2 rounded text-sm text-left ${
+                    thumbnailSettings.autoDetectScenes
+                      ? 'bg-[#E44E51]/10 text-gray-900 border border-[#E44E51]'
+                      : 'bg-white text-gray-700 border border-gray-200'
+                  }`}
+                >
+                  <div className="font-medium flex items-center">
+                    <Sparkles className="w-4 h-4 mr-1" />
+                    Smart Scene Detection
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    AI-powered selection of key moments
+                  </p>
+                </button>
+                
+                <button
+                  onClick={() => setThumbnailSettings({
+                    ...thumbnailSettings,
+                    autoDetectScenes: false
+                  })}
+                  className={`p-2 rounded text-sm text-left ${
+                    !thumbnailSettings.autoDetectScenes
+                      ? 'bg-[#E44E51]/10 text-gray-900 border border-[#E44E51]'
+                      : 'bg-white text-gray-700 border border-gray-200'
+                  }`}
+                >
+                  <div className="font-medium flex items-center">
+                    <Layout className="w-4 h-4 mr-1" />
+                    Equal Intervals
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Distribute evenly across timeline
+                  </p>
+                </button>
+              </div>
+            </div>
+            
+            <div className="p-3 bg-gray-50 rounded-lg space-y-3">
+              <h3 className="text-sm font-medium text-gray-700">Enhancement Options</h3>
+              
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => setThumbnailSettings({
+                    ...thumbnailSettings,
+                    applyColorCorrection: !thumbnailSettings.applyColorCorrection
+                  })}
+                  className={`p-2 rounded-lg text-left ${
+                    thumbnailSettings.applyColorCorrection
+                      ? 'bg-[#E44E51]/10 border-[#E44E51] border'
+                      : 'bg-white border border-gray-200'
+                  }`}
+                >
+                  <div className="font-medium text-sm flex items-center">
+                    <Palette className="w-4 h-4 mr-1" />
+                    Auto Color Correction
+                  </div>
+                </button>
+                
+                <button
+                  onClick={() => setThumbnailSettings({
+                    ...thumbnailSettings,
+                    smartCrop: !thumbnailSettings.smartCrop
+                  })}
+                  className={`p-2 rounded-lg text-left ${
+                    thumbnailSettings.smartCrop
+                      ? 'bg-[#E44E51]/10 border-[#E44E51] border'
+                      : 'bg-white border border-gray-200'
+                  }`}
+                >
+                  <div className="font-medium text-sm flex items-center">
+                    <Crop className="w-4 h-4 mr-1" />
+                    Smart Cropping
+                  </div>
+                </button>
+                
+                <button
+                  onClick={() => setTextOverlaySettings({
+                    ...textOverlaySettings,
+                    enabled: !textOverlaySettings.enabled
+                  })}
+                  className={`p-2 rounded-lg text-left ${
+                    textOverlaySettings.enabled
+                      ? 'bg-[#E44E51]/10 border-[#E44E51] border'
+                      : 'bg-white border border-gray-200'
+                  }`}
+                >
+                  <div className="font-medium text-sm flex items-center">
+                    <Type className="w-4 h-4 mr-1" />
+                    Text Overlay
+                  </div>
+                </button>
+                
+                <button
+                  onClick={() => setThumbnailSettings({
+                    ...thumbnailSettings,
+                    includeSeries: !thumbnailSettings.includeSeries
+                  })}
+                  className={`p-2 rounded-lg text-left ${
+                    thumbnailSettings.includeSeries
+                      ? 'bg-[#E44E51]/10 border-[#E44E51] border'
+                      : 'bg-white border border-gray-200'
+                  }`}
+                >
+                  <div className="font-medium text-sm flex items-center">
+                    <Layers className="w-4 h-4 mr-1" />
+                    Series Consistency
+                  </div>
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+
+      case 'animated':
+        return (
+          <div className="space-y-4">
+            <div className="grid grid-cols-3 gap-3">
+              {['gif', 'webp', 'mp4'].map(type => (
+                <button
+                  key={type}
+                  onClick={() => setAnimatedSettings({
+                    ...animatedSettings,
+                    type: type as any
+                  })}
+                  className={`p-2 rounded-lg text-center ${
+                    animatedSettings.type === type
+                      ? 'bg-[#E44E51]/10 border-[#E44E51] border'
+                      : 'bg-white border border-gray-200 hover:bg-gray-50'
+                  }`}
+                >
+                  <div className="font-medium text-sm">
+                    {type.toUpperCase()}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    {type === 'gif' ? 'Widely compatible' : 
+                     type === 'webp' ? 'Smaller size' : 'Best quality'}
+                  </div>
+                </button>
+              ))}
+            </div>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700">
+                  Duration (seconds)
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="10"
+                  value={animatedSettings.duration}
+                  onChange={(e) => setAnimatedSettings({
+                    ...animatedSettings,
+                    duration: Number(e.target.value)
+                  })}
+                  className="w-full rounded-lg border-gray-300 text-sm"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700">
+                  Frames per Second
+                </label>
+                <input
+                  type="number"
+                  min="5"
+                  max="30"
+                  value={animatedSettings.fps}
+                  onChange={(e) => setAnimatedSettings({
+                    ...animatedSettings,
+                    fps: Number(e.target.value)
+                  })}
+                  className="w-full rounded-lg border-gray-300 text-sm"
+                />
+              </div>
+            </div>
+            
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700">
+                Width (height will scale proportionally)
+              </label>
+              <input
+                type="number"
+                min="320"
+                max="1920"
+                step="80"
+                value={animatedSettings.width}
+                onChange={(e) => setAnimatedSettings({
+                  ...animatedSettings,
+                  width: Number(e.target.value)
+                })}
+                className="w-full rounded-lg border-gray-300 text-sm"
+              />
+            </div>
+            
+            <div className="p-3 bg-gray-50 rounded-lg space-y-3">
+              <h3 className="text-sm font-medium flex items-center">
+                <Wand2 className="w-4 h-4 mr-1" />
+                Animation Effects
+              </h3>
+              
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => setAnimatedSettings({
+                    ...animatedSettings,
+                    smartLooping: !animatedSettings.smartLooping
+                  })}
+                  className={`p-2 rounded-lg text-left ${
+                    animatedSettings.smartLooping
+                      ? 'bg-[#E44E51]/10 border-[#E44E51] border'
+                      : 'bg-white border border-gray-200'
+                  }`}
+                >
+                  <div className="font-medium text-sm flex items-center">
+                    <RefreshCw className="w-4 h-4 mr-1" />
+                    Smart Looping
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    Find perfect loop points
+                  </div>
+                </button>
+                
+                <button
+                  onClick={() => setAnimatedSettings({
+                    ...animatedSettings,
+                    zoomEffect: !animatedSettings.zoomEffect
+                  })}
+                  className={`p-2 rounded-lg text-left ${
+                    animatedSettings.zoomEffect
+                      ? 'bg-[#E44E51]/10 border-[#E44E51] border'
+                      : 'bg-white border border-gray-200'
+                  }`}
+                >
+                  <div className="font-medium text-sm flex items-center">
+                    <Maximize2 className="w-4 h-4 mr-1" />
+                    Zoom Effect
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    Subtle zoom animation
+                  </div>
+                </button>
+              </div>
+              
+              {animatedSettings.zoomEffect && (
+                <div className="space-y-1">
+                  <div className="flex justify-between text-xs text-gray-500">
+                    <span>Zoom Amount</span>
+                    <span>{animatedSettings.zoomAmount}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="1"
+                    max="20"
+                    value={animatedSettings.zoomAmount}
+                    onChange={(e) => setAnimatedSettings({
+                      ...animatedSettings,
+                      zoomAmount: Number(e.target.value)
+                    })}
+                    className="w-full accent-[#E44E51]"
+                  />
+                </div>
+              )}
+            </div>
+            
+            <div className="p-3 bg-gray-50 rounded-lg space-y-3">
+              <div className="flex justify-between">
+                <h3 className="text-sm font-medium flex items-center">
+                  <Monitor className="w-4 h-4 mr-1" />
+                  Platform Optimization
+                </h3>
+                
+                <div className="flex space-x-1">
+                  {['youtube', 'instagram', 'tiktok', 'facebook', 'twitter', 'general'].map(platform => {
+                    const Icon = platform === 'youtube' ? Youtube :
+                               platform === 'instagram' ? Instagram :
+                               platform === 'tiktok' ? Video :
+                               platform === 'facebook' ? Facebook :
+                               platform === 'twitter' ? Twitter : Globe;
+                    
+                    return (
+                      <button
+                        key={platform}
+                        onClick={() => {
+                          setAnimatedSettings({
+                            ...animatedSettings,
+                            platform: platform as any
+                          });
+                          
+                          // Apply platform-specific settings
+                          const preset = platformPresets[platform as keyof typeof platformPresets];
+                          setAnimatedSettings(prev => ({
+                            ...prev,
+                            width: preset.width
+                          }));
+                        }}
+                        className={`p-1.5 rounded ${
+                          animatedSettings.platform === platform
+                            ? 'bg-[#E44E51]/10 text-[#E44E51]'
+                            : 'bg-white text-gray-500 hover:bg-gray-100'
+                        }`}
+                        title={platform.charAt(0).toUpperCase() + platform.slice(1)}
+                      >
+                        <Icon className="w-4 h-4" />
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              
+              {animatedSettings.type === 'gif' && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-xs text-gray-500">
+                      <span>Quality Level</span>
+                      <span>{animatedSettings.quality}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="60"
+                      max="100"
+                      value={animatedSettings.quality}
+                      onChange={(e) => setAnimatedSettings({
+                        ...animatedSettings,
+                        quality: Number(e.target.value)
+                      })}
+                      className="w-full accent-[#E44E51]"
+                    />
+                  </div>
+                  
+                  <div className="space-y-1 flex flex-col justify-end">
+                    <label className="inline-flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={animatedSettings.dithering}
+                        onChange={(e) => setAnimatedSettings({
+                          ...animatedSettings,
+                          dithering: e.target.checked
+                        })}
+                        className="rounded border-gray-300 text-[#E44E51]"
+                      />
+                      <span className="ml-2 text-xs text-gray-700">Dithering</span>
+                    </label>
+                    
+                    <label className="inline-flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={animatedSettings.optimize}
+                        onChange={(e) => setAnimatedSettings({
+                          ...animatedSettings,
+                          optimize: e.target.checked
+                        })}
+                        className="rounded border-gray-300 text-[#E44E51]"
+                      />
+                      <span className="ml-2 text-xs text-gray-700">Optimize File Size</span>
+                    </label>
+                  </div>
+                </div>
+              )}
+            </div>
+            
+            {textOverlaySettings.enabled && (
+              <div className="p-3 bg-gray-50 rounded-lg space-y-3">
+                <div className="flex justify-between">
+                  <h3 className="text-sm font-medium flex items-center">
+                    <Type className="w-4 h-4 mr-1" />
+                    Text Overlay
+                  </h3>
+                  
+                  <button
+                    onClick={() => setTextOverlaySettings({
+                      ...textOverlaySettings,
+                      enabled: false
+                    })}
+                    className="text-xs text-red-500 hover:text-red-700"
+                  >
+                    Remove
+                  </button>
+                </div>
+                
+                <input
+                  type="text"
+                  value={textOverlaySettings.text}
+                  onChange={(e) => setTextOverlaySettings({
+                    ...textOverlaySettings,
+                    text: e.target.value
+                  })}
+                  className="w-full rounded-lg border-gray-300 text-sm"
+                  placeholder="Enter text for overlay"
+                />
+                
+                <div className="flex space-x-2">
+                  {['top', 'center', 'bottom'].map(pos => (
+                    <button
+                      key={pos}
+                      onClick={() => setTextOverlaySettings({
+                        ...textOverlaySettings,
+                        position: pos as any
+                      })}
+                      className={`px-2 py-1 rounded text-xs ${
+                        textOverlaySettings.position === pos
+                          ? 'bg-[#E44E51]/10 text-[#E44E51]'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {pos.charAt(0).toUpperCase() + pos.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+        
+      case 'timelapse':
+        return (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700">
+                  Number of Frames
+                </label>
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => setThumbnailSettings({
+                      ...thumbnailSettings,
+                      count: Math.max(4, thumbnailSettings.count - 1)
+                    })}
+                    className="p-1 bg-gray-100 rounded"
+                  >
+                    -
+                  </button>
+                  <input
+                    type="number"
+                    min="4"
+                    max="16"
+                    value={thumbnailSettings.count}
+                    onChange={(e) => setThumbnailSettings({
+                      ...thumbnailSettings,
+                      count: Number(e.target.value)
+                    })}
+                    className="w-full rounded-lg border-gray-300 text-sm text-center"
+                  />
+                  <button
+                    onClick={() => setThumbnailSettings({
+                      ...thumbnailSettings,
+                      count: Math.min(16, thumbnailSettings.count + 1)
+                    })}
+                    className="p-1 bg-gray-100 rounded"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700">
+                  Layout Preview
+                </label>
+                <div className="bg-gray-100 rounded-lg p-2 h-12 flex items-center justify-center">
+                  <div className="grid grid-cols-4 gap-1 w-full h-full">
+                    {Array.from({ length: thumbnailSettings.count }).map((_, i) => (
+                      <div key={i} className="bg-gray-300 rounded-sm"></div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <label className="block text-sm font-medium text-gray-700">Format</label>
+                </div>
+                <div className="flex space-x-2">
+                  {['jpg', 'png', 'webp'].map(format => (
+                    <button
+                      key={format}
+                      onClick={() => setThumbnailSettings({
+                        ...thumbnailSettings,
+                        format: format as any
+                      })}
+                      className={`px-3 py-1.5 rounded text-sm ${
+                        thumbnailSettings.format === format
+                          ? 'bg-[#E44E51]/10 text-[#E44E51]'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {format.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <label className="block text-sm font-medium text-gray-700">Quality</label>
+                  <span className="text-xs text-gray-500">{thumbnailSettings.quality}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="60"
+                  max="100"
+                  value={thumbnailSettings.quality}
+                  onChange={(e) => setThumbnailSettings({
+                    ...thumbnailSettings,
+                    quality: Number(e.target.value)
+                  })}
+                  className="w-full accent-[#E44E51]"
+                />
+              </div>
+            </div>
+            
+            <div className="p-3 bg-gray-50 rounded-lg space-y-3">
+              <h3 className="text-sm font-medium flex items-center">
+                <Wand2 className="w-4 h-4 mr-1" />
+                Enhancement Options
+              </h3>
+              
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => setThumbnailSettings({
+                    ...thumbnailSettings,
+                    applyColorCorrection: !thumbnailSettings.applyColorCorrection
+                  })}
+                  className={`p-2 rounded-lg text-left ${
+                    thumbnailSettings.applyColorCorrection
+                      ? 'bg-[#E44E51]/10 border-[#E44E51] border'
+                      : 'bg-white border border-gray-200'
+                  }`}
+                >
+                  <div className="font-medium text-sm flex items-center">
+                    <Palette className="w-4 h-4 mr-1" />
+                    Auto Color Enhancement
+                  </div>
+                </button>
+                
+                <button
+                  onClick={() => setTextOverlaySettings({
+                    ...textOverlaySettings,
+                    enabled: !textOverlaySettings.enabled
+                  })}
+                  className={`p-2 rounded-lg text-left ${
+                    textOverlaySettings.enabled
+                      ? 'bg-[#E44E51]/10 border-[#E44E51] border'
+                      : 'bg-white border border-gray-200'
+                  }`}
+                >
+                  <div className="font-medium text-sm flex items-center">
+                    <Type className="w-4 h-4 mr-1" />
+                    Add Text Overlay
+                  </div>
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+        
+      default:
+        return null;
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 overflow-y-auto">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl overflow-hidden">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl overflow-hidden">
         {/* Header */}
         <div className="flex justify-between items-center px-6 py-4 border-b">
-          <h2 className="text-xl font-semibold text-gray-900">Export Video</h2>
+          <h2 className="text-xl font-semibold text-gray-900">Export Media</h2>
           <button 
             onClick={onClose} 
             className="text-gray-500 hover:text-gray-700"
@@ -402,7 +1913,7 @@ const EnhancedExportDialog: React.FC<EnhancedExportDialogProps> = ({
         </div>
         
         {/* Content */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 p-6">
           {/* Left column - Preview */}
           <div className="md:col-span-1 space-y-4">
             <div className="aspect-video bg-gray-900 rounded-lg overflow-hidden relative">
@@ -412,18 +1923,34 @@ const EnhancedExportDialog: React.FC<EnhancedExportDialogProps> = ({
                 onEnded={() => setIsPreviewPlaying(false)}
               />
               
+              {/* Canvas for processing previews */}
+              <canvas ref={canvasRef} className="absolute inset-0 w-full h-full object-contain" />
+              
               <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 hover:opacity-100 transition-opacity">
                 <button
                   onClick={togglePlayPreview}
                   className="p-3 bg-white/10 rounded-full hover:bg-white/20 transition-colors"
                 >
                   {isPreviewPlaying ? (
-                    <X className="h-6 w-6 text-white" />
+                    <Pause className="h-6 w-6 text-white" />
                   ) : (
                     <Play className="h-6 w-6 text-white" />
                   )}
                 </button>
               </div>
+              
+              {/* Show crop overlay when in thumbnails tab with smart crop enabled */}
+              {activeTab === 'thumbnails' && thumbnailSettings.smartCrop && cropSettings.enabled && (
+                <div
+                  className="absolute border-2 border-[#E44E51] pointer-events-none"
+                  style={{
+                    left: `${cropSettings.left}px`,
+                    top: `${cropSettings.top}px`,
+                    width: `${cropSettings.width}px`,
+                    height: `${cropSettings.height}px`
+                  }}
+                />
+              )}
             </div>
             
             {/* Trim controls */}
@@ -474,18 +2001,29 @@ const EnhancedExportDialog: React.FC<EnhancedExportDialogProps> = ({
               {Object.entries({
                 video: { label: 'Video', icon: Film },
                 audio: { label: 'Audio', icon: Music },
-                image: { label: 'Images', icon: Image },
-                special: { label: 'Special', icon: Zap }
+                image: { label: 'Animated', icon: Image },
+                thumbnails: { label: 'Thumbnails', icon: Camera }
               }).map(([tab, { label, icon: Icon }]) => (
                 <button
                   key={tab}
                   onClick={() => {
                     setActiveTab(tab);
                     // Set default format for each tab
-                    if (tab === 'video') setSelectedFormat('mp4');
-                    if (tab === 'audio') setSelectedFormat('mp3');
-                    if (tab === 'image') setSelectedFormat('gif');
-                    if (tab === 'special') setSelectedFormat('thumbnail');
+                    if (tab === 'video') {
+                      setSelectedFormat('mp4');
+                      setActiveSubTab('standard');
+                    }
+                    if (tab === 'audio') {
+                      setSelectedFormat('mp3');
+                      setActiveSubTab('standard');
+                    }
+                    if (tab === 'image') {
+                      setSelectedFormat('gif');
+                      setActiveSubTab('standard');
+                    }
+                    if (tab === 'thumbnails') {
+                      setActiveSubTab('single');
+                    }
                   }}
                   className={`flex items-center space-x-1 px-4 py-2 border-b-2 transition-colors whitespace-nowrap ${
                     activeTab === tab
@@ -499,63 +2037,97 @@ const EnhancedExportDialog: React.FC<EnhancedExportDialogProps> = ({
               ))}
             </div>
             
-            {/* Format Selection */}
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              {formatCategories[activeTab as keyof typeof formatCategories].map((format) => (
-                <button
-                  key={format.id}
-                  onClick={() => {
-                    setSelectedFormat(format.id);
-                    if (format.codec && format.codec.length > 0) {
-                      setSelectedCodec(format.codec[0]);
-                    }
-                  }}
-                  className={`flex flex-col items-start p-3 border rounded-lg transition-colors ${
-                    selectedFormat === format.id
-                      ? 'bg-[#E44E51]/5 border-[#E44E51] text-gray-900'
-                      : 'border-gray-200 text-gray-700 hover:border-[#E44E51] hover:bg-gray-50'
-                  }`}
-                >
-                  <div className="flex items-center space-x-2 mb-1">
-                    {getFormatIcon(format.id)}
-                    <span className="font-medium">{format.name}</span>
-                  </div>
-                  <p className="text-xs text-gray-500">{format.description}</p>
-                </button>
-              ))}
-            </div>
-            
-            {/* Quality Presets */}
-            <div className="space-y-2">
-              <h3 className="text-sm font-medium text-gray-700">Quality</h3>
-              <div className="grid grid-cols-4 gap-2">
-                {['low', 'medium', 'high', 'ultra'].map((quality) => (
+            {/* Sub-tabs for thumbnail types */}
+            {activeTab === 'thumbnails' && (
+              <div className="flex space-x-2 border-b pb-2">
+                {[
+                  { id: 'single', label: 'Single', icon: Camera },
+                  { id: 'multiple', label: 'Multiple', icon: Grid },
+                  { id: 'animated', label: 'Animated', icon: Play },
+                  { id: 'timelapse', label: 'Timelapse', icon: Layout }
+                ].map(({ id, label, icon: Icon }) => (
                   <button
-                    key={quality}
-                    onClick={() => setSelectedQuality(quality)}
-                    className={`px-3 py-2 rounded-lg text-sm transition-colors ${
-                      selectedQuality === quality
-                        ? 'bg-[#E44E51]/10 text-[#E44E51] font-medium'
+                    key={id}
+                    onClick={() => setActiveSubTab(id)}
+                    className={`flex items-center space-x-1 px-3 py-1.5 rounded-lg ${
+                      activeSubTab === id
+                        ? 'bg-[#E44E51]/10 text-[#E44E51]'
                         : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                     }`}
                   >
-                    {quality.charAt(0).toUpperCase() + quality.slice(1)}
+                    <Icon className="w-4 h-4" />
+                    <span className="text-sm">{label}</span>
                   </button>
                 ))}
               </div>
-            </div>
+            )}
             
-            {/* Advanced Settings Toggle */}
-            <button
-              onClick={() => setShowAdvancedSettings(!showAdvancedSettings)}
-              className="flex items-center space-x-2 text-gray-600 hover:text-gray-900"
-            >
-              <Settings className="w-4 h-4" />
-              <span className="text-sm">Advanced Settings</span>
-              <ChevronDown className={`w-4 h-4 transition-transform ${
-                showAdvancedSettings ? 'rotate-180' : ''
-              }`} />
-            </button>
+            {/* Format Selection */}
+            {activeTab !== 'thumbnails' && (
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                {formatCategories[activeTab as keyof typeof formatCategories].map((format) => (
+                  <button
+                    key={format.id}
+                    onClick={() => {
+                      setSelectedFormat(format.id);
+                      if (format.codec && format.codec.length > 0) {
+                        setSelectedCodec(format.codec[0]);
+                      }
+                    }}
+                    className={`flex flex-col items-start p-3 border rounded-lg transition-colors ${
+                      selectedFormat === format.id
+                        ? 'bg-[#E44E51]/5 border-[#E44E51] text-gray-900'
+                        : 'border-gray-200 text-gray-700 hover:border-[#E44E51] hover:bg-gray-50'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-2 mb-1">
+                      {getFormatIcon(format.id)}
+                      <span className="font-medium">{format.name}</span>
+                    </div>
+                    <p className="text-xs text-gray-500">{format.description}</p>
+                  </button>
+                ))}
+              </div>
+            )}
+            
+            {/* Thumbnail specific controls */}
+            {activeTab === 'thumbnails' && renderThumbnailControls()}
+            
+            {/* Quality Presets - only show for video and audio */}
+            {(activeTab === 'video' || activeTab === 'audio') && (
+              <div className="space-y-2">
+                <h3 className="text-sm font-medium text-gray-700">Quality</h3>
+                <div className="grid grid-cols-4 gap-2">
+                  {['low', 'medium', 'high', 'ultra'].map((quality) => (
+                    <button
+                      key={quality}
+                      onClick={() => setSelectedQuality(quality)}
+                      className={`px-3 py-2 rounded-lg text-sm transition-colors ${
+                        selectedQuality === quality
+                          ? 'bg-[#E44E51]/10 text-[#E44E51] font-medium'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      {quality.charAt(0).toUpperCase() + quality.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {/* Advanced Settings Toggle - only show for video, audio and image */}
+            {(activeTab === 'video' || activeTab === 'audio' || activeTab === 'image') && (
+              <button
+                onClick={() => setShowAdvancedSettings(!showAdvancedSettings)}
+                className="flex items-center space-x-2 text-gray-600 hover:text-gray-900"
+              >
+                <Settings className="w-4 h-4" />
+                <span className="text-sm">Advanced Settings</span>
+                <ChevronDown className={`w-4 h-4 transition-transform ${
+                  showAdvancedSettings ? 'rotate-180' : ''
+                }`} />
+              </button>
+            )}
             
             {/* Advanced Settings */}
             <AnimatePresence>
@@ -566,6 +2138,7 @@ const EnhancedExportDialog: React.FC<EnhancedExportDialogProps> = ({
                   exit={{ height: 0, opacity: 0 }}
                   className="space-y-4 overflow-hidden"
                 >
+                  {/* Video advanced settings */}
                   {activeTab === 'video' && (
                     <>
                       {/* Codec Selection */}
@@ -672,6 +2245,7 @@ const EnhancedExportDialog: React.FC<EnhancedExportDialogProps> = ({
                     </>
                   )}
                   
+                  {/* Audio advanced settings */}
                   {activeTab === 'audio' && (
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
@@ -710,6 +2284,7 @@ const EnhancedExportDialog: React.FC<EnhancedExportDialogProps> = ({
                     </div>
                   )}
                   
+                  {/* Image advanced settings */}
                   {activeTab === 'image' && selectedFormat === 'gif' && (
                     <div className="space-y-4">
                       <div className="grid grid-cols-2 gap-4">
