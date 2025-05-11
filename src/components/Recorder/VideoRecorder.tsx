@@ -9,7 +9,7 @@ import { useAIFeatures } from '../../hooks/useAIFeatures';
 import { AIFeatureGrid } from '../AI/AIFeatureGrid';
 import { AIVideoFeatures } from '../AI/AIVideoFeatures';
 import { AIProcessingOverlay } from '../AI/AIProcessingOverlay';
-import { EnhancedDownloadDialog } from './EnhancedDownloadDialog';
+import EnhancedExportDialog from '../Export/EnhancedExportDialog';
 import { Tooltip } from '../ui/Tooltip';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -397,6 +397,12 @@ export const VideoRecorder: React.FC = () => {
         if (timerIntervalRef.current) {
           clearInterval(timerIntervalRef.current);
           timerIntervalRef.current = null;
+        }
+        
+        // Stop tracks
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach(track => track.stop());
+          streamRef.current = null;
         }
         
         // Show download dialog
@@ -917,6 +923,7 @@ export const VideoRecorder: React.FC = () => {
             enabledFeatures={features}
             onFeatureToggle={toggleFeature}
             isProcessing={isProcessing}
+            compact={true}
           />
         </div>
 
@@ -967,12 +974,14 @@ export const VideoRecorder: React.FC = () => {
         </div>
       </div>
 
-      {/* Download Dialog */}
-      <EnhancedDownloadDialog
-        isOpen={showDownloadDialog}
-        onClose={() => setShowDownloadDialog(false)}
-        recordedBlob={recordedBlob}
-      />
+      {/* Enhanced Export Dialog */}
+      {showDownloadDialog && (
+        <EnhancedExportDialog 
+          isOpen={showDownloadDialog}
+          onClose={() => setShowDownloadDialog(false)}
+          videoBlob={recordedBlob}
+        />
+      )}
     </div>
   );
 };
