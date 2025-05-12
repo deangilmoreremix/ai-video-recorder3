@@ -14,6 +14,9 @@ import Testimonials from '../components/landing/Testimonials';
 import FloatingIcons from '../components/landing/FloatingIcons';
 import FeaturesList from '../components/landing/FeaturesList';
 import InteractiveFeatureDemo from '../components/landing/InteractiveFeatureDemo';
+import FloatingIconsButton from '../components/landing/FloatingIconsButton';
+import AnimatedFeatureCards from '../components/landing/AnimatedFeatureCards';
+import AnimatedFeatureTiles from '../components/landing/AnimatedFeatureTiles';
 
 const LandingPage = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -236,7 +239,7 @@ const LandingPage = () => {
                   whileTap={{ scale: 0.9 }}
                   onClick={() => videoRef.current?.play()}
                 >
-                  <Play className="w-10 h-10 text-white" fill="white" />
+                  <Play className="w-10 h-10 text-white" />
                 </motion.div>
               </div>
             </motion.div>
@@ -344,11 +347,45 @@ const LandingPage = () => {
         </div>
       </div>
       
-      {/* Comprehensive Feature List */}
-      <FeaturesList />
+      {/* Animated Feature Tiles */}
+      <AnimatedFeatureTiles />
+      
+      {/* Animated Feature Cards */}
+      <div className="py-24 bg-white">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center mb-16">
+            <motion.h2 
+              className="text-3xl sm:text-4xl font-bold text-gray-900"
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.8 }}
+            >
+              Discover What's Possible
+            </motion.h2>
+            <motion.p 
+              className="mt-4 text-xl text-gray-600"
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.8, delay: 0.2 }}
+            >
+              Explore our feature highlights with interactive cards
+            </motion.p>
+          </div>
+          
+          <AnimatedFeatureCards />
+          
+          {/* Floating Button for quick navigation */}
+          <FloatingIconsButton />
+        </div>
+      </div>
       
       {/* AI Features Showcase */}
       <AIFeatureShowcase />
+      
+      {/* Comprehensive Feature List */}
+      <FeaturesList />
       
       {/* Feature Highlights */}
       <div className="py-24 bg-gray-50">
