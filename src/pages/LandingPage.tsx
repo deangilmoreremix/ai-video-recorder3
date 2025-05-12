@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { motion, useScroll, useTransform, useAnimation } from 'framer-motion';
 import { Link } from 'react-router-dom';
-import { Play, Camera, Brain, Wand2, Film, Download, Sparkles, Scissors, Type, Clock, Layout, ChevronRight } from 'lucide-react';
+import { Play, Camera, Brain, Wand2, Film, Download, Sparkles, Scissors, Type, Clock, Layout, ChevronRight, Layers } from 'lucide-react';
 import { gsap } from 'gsap';
 import lottie from 'lottie-web';
 
