@@ -14,19 +14,22 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
   const [isPlaying, setIsPlaying] = useState(true);
   const [intensity, setIntensity] = useState(50);
   const [videoLoaded, setVideoLoaded] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationFrameRef = useRef<number>();
   
-  // Features data with updated video URLs to more reliable sources
+  // Features data with backup video URLs in case primary ones fail
   const features = [
     {
       id: 'face-detection',
       name: 'Face Detection',
       icon: Camera,
-      // Updated to a new reliable source
+      // Primary video URL
       videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-working-on-laptop-in-office-space-42905-large.mp4',
+      // Backup video URL from a different source
+      backupVideoUrl: 'https://cdn.pixabay.com/vimeo/529588647/face-73127.mp4?width=640&hash=b8fd9a0c0c77ff8c8af1a0f1caa59be7f0c12e62',
       fallbackImage: 'https://images.unsplash.com/photo-1590031905407-86afa9c32411?auto=format&fit=crop&w=800&q=80',
       description: 'Detect and track faces in real-time with precision'
     },
@@ -34,8 +37,8 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       id: 'facial-landmarks',
       name: 'Facial Landmarks',
       icon: Scan,
-      // Updated to a more reliable source
       videoUrl: 'https://player.vimeo.com/external/469885756.sd.mp4?s=d7cac9bd8c7b67a17d59eb4af33c740873ca78b3&profile_id=165&oauth2_token_id=57447761',
+      backupVideoUrl: 'https://cdn.pixabay.com/vimeo/186886273/woman-5541.mp4?width=640&hash=8a972f4ea39ebae65383e9d8e4432a98b89877c4',
       fallbackImage: 'https://images.unsplash.com/photo-1546458904-143d1674858d?auto=format&fit=crop&w=800&q=80',
       description: 'Track 468 facial points for advanced effects'
     },
@@ -43,8 +46,8 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       id: 'background-removal',
       name: 'Background Removal',
       icon: Trash2,
-      // Updated to a more reliable source
       videoUrl: 'https://player.vimeo.com/external/498927069.sd.mp4?s=72e78348da74a29704be555406aa579c2263bce1&profile_id=165&oauth2_token_id=57447761',
+      backupVideoUrl: 'https://cdn.pixabay.com/vimeo/330517967/people-20889.mp4?width=640&hash=d1e949af6e14bee0a9cbe87757f0bcf55fa52413',
       fallbackImage: 'https://images.unsplash.com/photo-1543269664-7eef42226a21?auto=format&fit=crop&w=800&q=80',
       description: 'Remove background without a green screen'
     },
@@ -52,8 +55,8 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       id: 'background-blur',
       name: 'Background Blur',
       icon: Layers,
-      // Updated to a more reliable source
       videoUrl: 'https://player.vimeo.com/external/534342299.sd.mp4?s=4b5dbc3e4d834e0b6e17a37a3e07979467e09fda&profile_id=165&oauth2_token_id=57447761',
+      backupVideoUrl: 'https://cdn.pixabay.com/vimeo/190846314/person-6633.mp4?width=640&hash=0042d80be1fcb5b65c8f7c519b3c3a7b4dd30f84',
       fallbackImage: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&w=800&q=80',
       description: 'Apply professional blur effect to background'
     },
@@ -61,8 +64,8 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       id: 'beautification',
       name: 'Beautification',
       icon: Sparkles,
-      // Updated to a more reliable source
       videoUrl: 'https://player.vimeo.com/external/403970080.sd.mp4?s=72dae3fe3fa91bcf9a1d6fe51fee5ad630091d46&profile_id=165&oauth2_token_id=57447761',
+      backupVideoUrl: 'https://cdn.pixabay.com/vimeo/694200272/face-128976.mp4?width=640&hash=46e1e6449f9c911c8bf3c7c67f9cb1b1bfb42e20',
       fallbackImage: 'https://images.unsplash.com/photo-1487412947147-5cebf100ffc2?auto=format&fit=crop&w=800&q=80',
       description: 'Enhance appearance with AI-powered filters'
     }
@@ -73,8 +76,9 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
   
   useEffect(() => {
     if (videoRef.current) {
-      // Reset video loaded state
+      // Reset video loaded state and error state
       setVideoLoaded(false);
+      setLoadError(false);
       
       // Load new video when feature changes
       videoRef.current.src = currentFeature.videoUrl;
@@ -87,24 +91,46 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       const handleError = () => {
         console.error(`Error loading video for ${currentFeature.name}`);
         
+        // If main video URL failed, try the backup URL
+        if (!loadError && currentFeature.backupVideoUrl) {
+          console.log(`Trying backup video URL for ${currentFeature.name}`);
+          setLoadError(true);
+          
+          if (videoRef.current) {
+            videoRef.current.src = currentFeature.backupVideoUrl;
+            videoRef.current.load();
+            videoRef.current.play().catch(err => {
+              console.error("Failed to play backup video:", err);
+              // Final fallback to image
+              useImageFallback();
+            });
+          }
+        } else {
+          // If backup also failed or there's no backup, use the image fallback
+          useImageFallback();
+        }
+      };
+      
+      // Function to use image fallback when all video sources fail
+      const useImageFallback = () => {
         // Update UI with fallback
         if (videoRef.current) {
           // Ensure poster is set
           videoRef.current.poster = currentFeature.fallbackImage;
           
-          // Set up the error state
-          setVideoLoaded(false);
-          
           // Make sure the video element itself is visible
           if (videoRef.current.style.display === 'none') {
             videoRef.current.style.display = 'block';
           }
+          
+          setVideoLoaded(false);
         }
       };
       
       // Add load success handler
       const handleLoadedData = () => {
         setVideoLoaded(true);
+        setLoadError(false); // Reset error state on successful load
       };
       
       // Set up event listeners
@@ -124,7 +150,7 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [activeFeature, currentFeature.videoUrl]);
+  }, [activeFeature]);
   
   useEffect(() => {
     if (videoRef.current) {
@@ -139,7 +165,9 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
         if (videoRef.current.pause) {
           videoRef.current.pause();
         }
-        cancelAnimationFrame(animationFrameRef.current!);
+        if (animationFrameRef.current) {
+          cancelAnimationFrame(animationFrameRef.current);
+        }
       }
     }
   }, [isPlaying, videoLoaded]);
@@ -218,7 +246,7 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
         
         // Draw loading text or status
         ctx.font = "16px Arial";
-        ctx.fillText("Preview loading...", canvas.width / 2, canvas.height / 2 + 15);
+        ctx.fillText(loadError ? "Using fallback preview" : "Preview loading...", canvas.width / 2, canvas.height / 2 + 15);
       }
       
       // Draw simplified feature effect even without video
@@ -629,26 +657,31 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
   // Handle video loading
   const handleVideoLoad = () => {
     setVideoLoaded(true);
+    setLoadError(false);
   };
   
   // Handle video error with more robust error handling
   const handleVideoError = () => {
     console.error(`Error loading video for ${currentFeature.name}`);
     
-    // Set video loaded to false to show fallback
-    setVideoLoaded(false);
-    
-    // Make sure poster is set
-    if (videoRef.current) {
-      videoRef.current.poster = currentFeature.fallbackImage;
+    // If main video URL failed and we haven't tried backup yet, try the backup URL
+    if (!loadError && currentFeature.backupVideoUrl) {
+      console.log(`Trying backup video URL for ${currentFeature.name}`);
+      setLoadError(true);
       
-      // Make sure the video element is visible despite errors
-      videoRef.current.style.display = 'block';
-    }
-    
-    // Continue with animation effect even without video
-    if (isPlaying) {
-      animateEffect();
+      if (videoRef.current) {
+        // Attempt to load the backup URL
+        videoRef.current.src = currentFeature.backupVideoUrl;
+        videoRef.current.load();
+        videoRef.current.play().catch(err => {
+          console.error("Failed to play backup video:", err);
+          // Final fallback to image
+          setVideoLoaded(false);
+        });
+      }
+    } else {
+      // If backup also failed or there's no backup, use the image fallback
+      setVideoLoaded(false);
     }
   };
 
@@ -764,7 +797,7 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
             
             {!videoLoaded && (
               <div className="absolute right-4 bottom-4 bg-black/60 text-white text-xs py-1 px-2 rounded">
-                Using fallback preview
+                {loadError ? "Using backup preview" : "Using fallback preview"}
               </div>
             )}
           </div>
