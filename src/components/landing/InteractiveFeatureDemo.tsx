@@ -25,6 +25,7 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       name: 'Face Detection',
       icon: Camera,
       videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-talking-to-camera-for-a-vlog-40885-large.mp4',
+      fallbackImage: 'https://images.unsplash.com/photo-1590031905407-86afa9c32411?auto=format&fit=crop&w=800&q=80',
       description: 'Detect and track faces in real-time with precision'
     },
     {
@@ -32,6 +33,7 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       name: 'Facial Landmarks',
       icon: Scan,
       videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-talking-looking-at-camera-43786-large.mp4',
+      fallbackImage: 'https://images.unsplash.com/photo-1546458904-143d1674858d?auto=format&fit=crop&w=800&q=80',
       description: 'Track 468 facial points for advanced effects'
     },
     {
@@ -39,6 +41,7 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       name: 'Background Removal',
       icon: Trash2,
       videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-talking-in-a-video-call-44774-large.mp4',
+      fallbackImage: 'https://images.unsplash.com/photo-1543269664-7eef42226a21?auto=format&fit=crop&w=800&q=80',
       description: 'Remove background without a green screen'
     },
     {
@@ -46,6 +49,7 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       name: 'Background Blur',
       icon: Layers,
       videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-vlogging-about-her-new-year-resolutions-47022-large.mp4',
+      fallbackImage: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&w=800&q=80',
       description: 'Apply professional blur effect to background'
     },
     {
@@ -53,6 +57,7 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       name: 'Beautification',
       icon: Sparkles,
       videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-portrait-of-a-young-model-posing-during-a-shoot-43929-large.mp4',
+      fallbackImage: 'https://images.unsplash.com/photo-1487412947147-5cebf100ffc2?auto=format&fit=crop&w=800&q=80',
       description: 'Enhance appearance with AI-powered filters'
     }
   ];
@@ -66,8 +71,34 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       videoRef.current.src = currentFeature.videoUrl;
       videoRef.current.load();
       
+      // Set poster as fallback
+      videoRef.current.poster = currentFeature.fallbackImage;
+      
+      // Add error handler
+      const handleError = () => {
+        console.error(`Error loading video for ${currentFeature.name}`);
+        if (videoRef.current) {
+          videoRef.current.poster = currentFeature.fallbackImage;
+          
+          // Create a div that shows we're using fallback
+          const parent = videoRef.current.parentElement;
+          if (parent) {
+            // Check if error message already exists
+            const existingMsg = parent.querySelector('.video-error-msg');
+            if (!existingMsg) {
+              const errorMsg = document.createElement('div');
+              errorMsg.className = 'absolute bottom-4 right-4 px-2 py-1 bg-black/50 text-white rounded text-xs video-error-msg';
+              errorMsg.textContent = 'Using preview image';
+              parent.appendChild(errorMsg);
+            }
+          }
+        }
+      };
+      
+      videoRef.current.onerror = handleError;
+      
       if (isPlaying) {
-        videoRef.current.play();
+        videoRef.current.play().catch(handleError);
       }
     }
     
@@ -82,7 +113,9 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
   useEffect(() => {
     if (videoRef.current) {
       if (isPlaying) {
-        videoRef.current.play();
+        videoRef.current.play().catch(() => {
+          // If play fails, we'll just show the poster/fallback
+        });
         animateEffect();
       } else {
         videoRef.current.pause();
@@ -121,7 +154,7 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
-    // First draw video frame
+    // First draw video frame or fallback
     if (video.readyState >= 2) {
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       
@@ -143,6 +176,16 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
           drawBeautificationEffect(ctx, intensity);
           break;
       }
+    } else {
+      // Draw placeholder/loading state if video not ready
+      ctx.fillStyle = "#1a202c"; // Dark background
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      // Draw loading text
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "16px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText("Loading demo...", canvas.width / 2, canvas.height / 2);
     }
     
     // Schedule next frame
@@ -438,6 +481,14 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
     ctx.stroke();
   };
   
+  // Handle video error
+  const handleVideoError = () => {
+    console.error(`Error loading video for ${currentFeature.name}`);
+    if (videoRef.current) {
+      videoRef.current.poster = currentFeature.fallbackImage;
+    }
+  };
+
   return (
     <div className="rounded-xl bg-white shadow-xl p-6 border border-gray-100">
       <div className="mb-6">
@@ -534,6 +585,8 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
               autoPlay={isPlaying}
               loop
               muted
+              poster={currentFeature.fallbackImage}
+              onError={handleVideoError}
             ></video>
             
             <canvas 

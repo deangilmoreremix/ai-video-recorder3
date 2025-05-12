@@ -11,32 +11,52 @@ const AIFeatureShowcase: React.FC = () => {
       title: 'Face Detection & Tracking',
       description: 'Our AI can detect and track faces in real-time, enabling dynamic effects and precise focusing.',
       icon: Camera,
-      video: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-talking-to-camera-for-a-vlog-40885-large.mp4'
+      video: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-talking-to-camera-for-a-vlog-40885-large.mp4',
+      fallbackImage: 'https://images.unsplash.com/photo-1590031905407-86afa9c32411?auto=format&fit=crop&w=800&q=80'
     },
     {
       id: 'background-removal',
       title: 'Background Removal',
       description: 'Remove your background instantly without a green screen, creating a professional look anywhere.',
       icon: Layers,
-      video: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-vlogging-about-her-new-year-resolutions-47022-large.mp4'
+      video: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-vlogging-about-her-new-year-resolutions-47022-large.mp4',
+      fallbackImage: 'https://images.unsplash.com/photo-1543269664-7eef42226a21?auto=format&fit=crop&w=800&q=80'
     },
     {
       id: 'facial-landmarks',
       title: 'Facial Landmarks',
       description: 'Track 468 facial points to enable advanced effects, expressions, and animations.',
       icon: Scan,
-      video: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-talking-looking-at-camera-43786-large.mp4'
+      video: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-talking-looking-at-camera-43786-large.mp4',
+      fallbackImage: 'https://images.unsplash.com/photo-1546458904-143d1674858d?auto=format&fit=crop&w=800&q=80'
     },
     {
       id: 'beauty-filters',
       title: 'Beauty Filters',
       description: 'Enhance your appearance subtly with AI-powered beauty filters that adapt to lighting conditions.',
       icon: Wand2,
-      video: 'https://assets.mixkit.co/videos/preview/mixkit-portrait-of-a-young-model-posing-during-a-shoot-43929-large.mp4'
+      video: 'https://assets.mixkit.co/videos/preview/mixkit-portrait-of-a-young-model-posing-during-a-shoot-43929-large.mp4',
+      fallbackImage: 'https://images.unsplash.com/photo-1487412947147-5cebf100ffc2?auto=format&fit=crop&w=800&q=80'
     }
   ];
   
   const activeFeatureData = features.find(f => f.id === activeFeature);
+
+  const handleVideoError = (e: React.SyntheticEvent<HTMLVideoElement, Event>, fallbackImage: string) => {
+    const video = e.currentTarget;
+    // Hide the video element
+    video.style.display = 'none';
+    
+    // Create and insert a fallback image
+    const parent = video.parentElement;
+    if (parent) {
+      const img = document.createElement('img');
+      img.src = fallbackImage;
+      img.className = 'w-full h-full object-cover';
+      img.alt = 'Feature preview';
+      parent.insertBefore(img, video);
+    }
+  };
 
   return (
     <div className="py-24 bg-gray-900">
@@ -103,6 +123,8 @@ const AIFeatureShowcase: React.FC = () => {
                     autoPlay
                     loop
                     muted
+                    onError={(e) => handleVideoError(e, activeFeatureData?.fallbackImage || '')}
+                    poster={activeFeatureData?.fallbackImage}
                   ></video>
                   
                   {/* Overlay to show the effect being applied */}
@@ -166,11 +188,11 @@ const AIFeatureShowcase: React.FC = () => {
                     activeFeature === feature.id ? 'ring-4 ring-[#E44E51]' : 'ring-1 ring-white/10'
                   }`}
                 >
-                  <video 
-                    src={feature.video} 
+                  <img 
+                    src={feature.fallbackImage}
+                    alt={feature.title}
                     className="w-full h-full object-cover"
-                    muted
-                  ></video>
+                  />
                   <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
                     <feature.icon className={`w-8 h-8 ${
                       activeFeature === feature.id ? 'text-[#E44E51]' : 'text-white/70'

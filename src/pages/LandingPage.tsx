@@ -24,6 +24,10 @@ const LandingPage = () => {
   const recordingAnimation = useRef<HTMLDivElement>(null);
   const editorAnimation = useRef<HTMLDivElement>(null);
   const [activeDemo, setActiveDemo] = useState('face-detection');
+  const [animationsLoaded, setAnimationsLoaded] = useState({
+    recording: false,
+    editor: false
+  });
   
   const { scrollYProgress } = useScroll();
   const y = useTransform(scrollYProgress, [0, 1], ['0%', '100%']);
@@ -33,6 +37,20 @@ const LandingPage = () => {
   
   // Controls for animations
   const controls = useAnimation();
+  
+  const handleVideoError = () => {
+    if (videoRef.current) {
+      videoRef.current.poster = 'https://images.unsplash.com/photo-1542744173-8e7e53415bb0?auto=format&fit=crop&w=1280&q=80';
+      
+      const parent = videoRef.current.parentElement;
+      if (parent) {
+        const errorMsg = document.createElement('div');
+        errorMsg.className = 'absolute inset-0 flex items-center justify-center bg-black/40';
+        errorMsg.innerHTML = '<div class="text-white text-center"><Play class="w-10 h-10 mx-auto mb-2 text-white"></Play><p>Video preview</p></div>';
+        parent.appendChild(errorMsg);
+      }
+    }
+  };
   
   useEffect(() => {
     // Start animations when component loads
@@ -44,24 +62,44 @@ const LandingPage = () => {
     
     // Initialize animation for the recording animation
     if (recordingAnimation.current) {
-      lottie.loadAnimation({
-        container: recordingAnimation.current,
-        renderer: 'svg',
-        loop: true,
-        autoplay: true,
-        path: 'https://assets10.lottiefiles.com/packages/lf20_zk6kbpdw.json' // Recording animation
-      });
+      try {
+        lottie.loadAnimation({
+          container: recordingAnimation.current,
+          renderer: 'svg',
+          loop: true,
+          autoplay: true,
+          path: 'https://assets10.lottiefiles.com/packages/lf20_zk6kbpdw.json' // Recording animation
+        }).addEventListener('DOMLoaded', () => {
+          setAnimationsLoaded(prev => ({ ...prev, recording: true }));
+        });
+      } catch (error) {
+        console.error("Error loading recording animation:", error);
+        // Show fallback if animation fails to load
+        if (recordingAnimation.current) {
+          recordingAnimation.current.innerHTML = '<div class="flex items-center justify-center h-full"><Camera class="w-16 h-16 text-red-500" /></div>';
+        }
+      }
     }
     
     // Initialize animation for the editor animation
     if (editorAnimation.current) {
-      lottie.loadAnimation({
-        container: editorAnimation.current,
-        renderer: 'svg',
-        loop: true,
-        autoplay: true,
-        path: 'https://assets5.lottiefiles.com/packages/lf20_ydo1amjm.json' // Video editing animation
-      });
+      try {
+        lottie.loadAnimation({
+          container: editorAnimation.current,
+          renderer: 'svg',
+          loop: true,
+          autoplay: true,
+          path: 'https://assets5.lottiefiles.com/packages/lf20_ydo1amjm.json' // Video editing animation
+        }).addEventListener('DOMLoaded', () => {
+          setAnimationsLoaded(prev => ({ ...prev, editor: true }));
+        });
+      } catch (error) {
+        console.error("Error loading editor animation:", error);
+        // Show fallback if animation fails to load
+        if (editorAnimation.current) {
+          editorAnimation.current.innerHTML = '<div class="flex items-center justify-center h-full"><Scissors class="w-16 h-16 text-blue-500" /></div>';
+        }
+      }
     }
 
     // Initialize hero section animation
@@ -109,7 +147,9 @@ const LandingPage = () => {
     // Autoplay demo video after a delay
     if (videoRef.current) {
       setTimeout(() => {
-        videoRef.current?.play();
+        videoRef.current?.play().catch(() => {
+          console.log("Autoplay prevented by browser - requiring user interaction");
+        });
       }, 3000);
     }
   }, [controls]);
@@ -229,15 +269,21 @@ const LandingPage = () => {
                 ref={videoRef}
                 className="w-full h-full object-cover"
                 src="https://assets.mixkit.co/videos/preview/mixkit-software-developer-working-on-code-screen-close-up-1738-large.mp4"
+                poster="https://images.unsplash.com/photo-1542744173-8e7e53415bb0?auto=format&fit=crop&w=1280&q=80"
                 muted
                 loop
+                onError={handleVideoError}
               ></video>
               <div className="absolute inset-0 flex items-center justify-center">
                 <motion.div 
                   className="w-20 h-20 bg-[#E44E51]/90 rounded-full flex items-center justify-center cursor-pointer hover:bg-[#E44E51] transition-colors"
                   whileHover={{ scale: 1.1 }}
                   whileTap={{ scale: 0.9 }}
-                  onClick={() => videoRef.current?.play()}
+                  onClick={() => {
+                    if (videoRef.current) {
+                      videoRef.current.paused ? videoRef.current.play() : videoRef.current.pause();
+                    }
+                  }}
                 >
                   <Play className="w-10 h-10 text-white" />
                 </motion.div>
@@ -251,7 +297,13 @@ const LandingPage = () => {
               animate={{ opacity: 1, scale: 1 }}
               transition={{ duration: 1, delay: 2.5 }}
             >
-              <div ref={recordingAnimation}></div>
+              {!animationsLoaded.recording ? (
+                <div className="w-full h-full rounded-full bg-[#E44E51]/10 flex items-center justify-center">
+                  <Camera className="w-12 h-12 text-[#E44E51]" />
+                </div>
+              ) : (
+                <div ref={recordingAnimation} className="w-full h-full"></div>
+              )}
             </motion.div>
             
             {/* Editor features overlay visualization */}
@@ -261,7 +313,13 @@ const LandingPage = () => {
               animate={{ opacity: 1, scale: 1 }}
               transition={{ duration: 1, delay: 2.8 }}
             >
-              <div ref={editorAnimation}></div>
+              {!animationsLoaded.editor ? (
+                <div className="w-full h-full rounded-full bg-blue-500/10 flex items-center justify-center">
+                  <Scissors className="w-12 h-12 text-blue-500" />
+                </div>
+              ) : (
+                <div ref={editorAnimation} className="w-full h-full"></div>
+              )}
             </motion.div>
             
             {/* Interactive demo elements (simulated) */}
@@ -574,6 +632,10 @@ const LandingPage = () => {
                   src={demo.thumbnail} 
                   alt={demo.title}
                   className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                  onError={(e) => {
+                    e.currentTarget.src = 'https://images.unsplash.com/photo-1581472723648-909f4851d4ae?auto=format&fit=crop&w=1000&q=80';
+                    e.currentTarget.alt = 'Demo preview';
+                  }}
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent flex items-center justify-center">
                   <motion.div 

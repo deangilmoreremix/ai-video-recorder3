@@ -16,6 +16,14 @@ const RecordingModeCard: React.FC<RecordingModeCardProps> = ({
   image,
   features
 }) => {
+  // Handle image loading errors
+  const handleImageError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
+    console.error(`Failed to load image: ${image}`);
+    // Set a fallback image
+    e.currentTarget.src = 'https://images.unsplash.com/photo-1581472723648-909f4851d4ae?auto=format&fit=crop&w=1000&q=80';
+    e.currentTarget.alt = 'Recording mode';
+  };
+
   return (
     <motion.div
       className="bg-white rounded-xl shadow-lg overflow-hidden"
@@ -25,6 +33,7 @@ const RecordingModeCard: React.FC<RecordingModeCardProps> = ({
         <img
           src={image}
           alt={title}
+          onError={handleImageError}
           className="w-full h-full object-cover transition-transform duration-500 hover:scale-110"
         />
         <div className="absolute inset-0 bg-gradient-to-b from-black/20 to-black/60">

@@ -25,6 +25,14 @@ const FeatureHighlight: React.FC<FeatureHighlightProps> = ({
   linkUrl,
   reversed = false
 }) => {
+  // Handle image error
+  const handleImageError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
+    console.error(`Failed to load image: ${imgSrc}`);
+    // Set a fallback image
+    e.currentTarget.src = 'https://images.unsplash.com/photo-1581472723648-909f4851d4ae?auto=format&fit=crop&w=1000&q=80';
+    e.currentTarget.alt = 'Feature image';
+  };
+
   return (
     <div className="md:flex md:items-center md:space-x-16">
       <div className={`md:w-1/2 ${reversed ? 'order-2' : 'order-1'}`}>
@@ -37,6 +45,7 @@ const FeatureHighlight: React.FC<FeatureHighlightProps> = ({
           <motion.img
             src={imgSrc}
             alt={title}
+            onError={handleImageError}
             className="rounded-xl shadow-xl"
             whileHover={{ scale: 1.02 }}
             transition={{ duration: 0.3 }}
