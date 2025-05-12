@@ -21,53 +21,52 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationFrameRef = useRef<number>();
   
-  // Features data with reliable video URLs
+  // Features data with more reliable video URLs and good fallback images
   const features = [
     {
       id: 'face-detection',
       name: 'Face Detection',
       icon: Camera,
-      // Use Mixkit videos which are free for commercial and personal use
-      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-talking-in-the-street-on-a-summers-day-41719-large.mp4',
-      // Backup video - another reliable source 
-      backupVideoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-business-woman-nodding-agreement-and-explaining-something-while-having-a-41722-large.mp4',
-      fallbackImage: 'https://images.unsplash.com/photo-1590031905407-86afa9c32411?auto=format&fit=crop&w=800&q=80',
+      // Using Pexels videos which are free and reliable
+      videoUrl: 'https://player.vimeo.com/external/308040879.sd.mp4?s=2d4b3a3e78244428b24d5d63c64af8eec2b8b976&profile_id=164&oauth2_token_id=57447761',
+      backupVideoUrl: 'https://player.vimeo.com/external/394068052.sd.mp4?s=78c1e56fcc2c85c7fa84d28ca53cb768e58271d9&profile_id=164&oauth2_token_id=57447761',
+      fallbackImage: 'https://images.pexels.com/photos/1124589/pexels-photo-1124589.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1',
       description: 'Detect and track faces in real-time with precision'
     },
     {
       id: 'facial-landmarks',
       name: 'Facial Landmarks',
       icon: Scan,
-      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-happy-woman-winking-outside-45292-large.mp4',
-      backupVideoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-talking-happily-on-her-phone-with-a-friend-12167-large.mp4',
-      fallbackImage: 'https://images.unsplash.com/photo-1546458904-143d1674858d?auto=format&fit=crop&w=800&q=80',
+      videoUrl: 'https://player.vimeo.com/external/403293698.sd.mp4?s=f45e69d5f2f22ee0fa4e58ad114e271768b76c65&profile_id=164&oauth2_token_id=57447761',
+      backupVideoUrl: 'https://player.vimeo.com/external/494561169.sd.mp4?s=ec7c79e185bccfc4d1eff6c6ad8ff1b9c0542f12&profile_id=164&oauth2_token_id=57447761',
+      fallbackImage: 'https://images.pexels.com/photos/2726111/pexels-photo-2726111.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1',
       description: 'Track 468 facial points for advanced effects'
     },
     {
       id: 'background-removal',
       name: 'Background Removal',
       icon: Trash2,
-      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-standing-up-as-a-helicopter-passes-40910-large.mp4',
-      backupVideoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-walking-under-umbrellas-decorations-34637-large.mp4',
-      fallbackImage: 'https://images.unsplash.com/photo-1543269664-7eef42226a21?auto=format&fit=crop&w=800&q=80',
+      videoUrl: 'https://player.vimeo.com/external/426921994.sd.mp4?s=7e36b3c34bef1ff1503f2b82968129a3fed14e25&profile_id=164&oauth2_token_id=57447761',
+      backupVideoUrl: 'https://player.vimeo.com/external/517090081.sd.mp4?s=ce0c926acf5cdb2a87a656487aadcb8c72d72d9a&profile_id=164&oauth2_token_id=57447761',
+      fallbackImage: 'https://images.pexels.com/photos/1382731/pexels-photo-1382731.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1',
       description: 'Remove background without a green screen'
     },
     {
       id: 'background-blur',
       name: 'Background Blur',
       icon: Layers,
-      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-woman-walking-under-the-sakura-flowery-trees-4956-large.mp4',
-      backupVideoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-girl-walks-under-an-orange-umbrella-4821-large.mp4',
-      fallbackImage: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&w=800&q=80',
+      videoUrl: 'https://player.vimeo.com/external/471907407.sd.mp4?s=d666ff5d1ccc16b0e5e2aed61187012108bbb65d&profile_id=164&oauth2_token_id=57447761',
+      backupVideoUrl: 'https://player.vimeo.com/external/459389137.sd.mp4?s=56e9acd7d462f67b89b1e393ded9d7f9cc728338&profile_id=164&oauth2_token_id=57447761',
+      fallbackImage: 'https://images.pexels.com/photos/2050994/pexels-photo-2050994.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1',
       description: 'Apply professional blur effect to background'
     },
     {
       id: 'beautification',
       name: 'Beautification',
       icon: Sparkles,
-      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-woman-with-a-lighted-candle-looking-at-the-camera-39958-large.mp4',
-      backupVideoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-walking-in-the-countryside-45666-large.mp4',
-      fallbackImage: 'https://images.unsplash.com/photo-1487412947147-5cebf100ffc2?auto=format&fit=crop&w=800&q=80',
+      videoUrl: 'https://player.vimeo.com/external/421147082.sd.mp4?s=d4022aea529d32ad5059e25c57e72173be360bd4&profile_id=164&oauth2_token_id=57447761',
+      backupVideoUrl: 'https://player.vimeo.com/external/552909524.sd.mp4?s=9c63b4a67c42b48a2d38ec909eef41b0a5289cdf&profile_id=164&oauth2_token_id=57447761',
+      fallbackImage: 'https://images.pexels.com/photos/774909/pexels-photo-774909.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1',
       description: 'Enhance appearance with AI-powered filters'
     }
   ];
@@ -89,19 +88,29 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       
       // Reset src attribute and load the new video
       videoRef.current.src = '';
+      videoRef.current.removeAttribute('src');
+      
+      // Initially set the poster image to ensure we always have a fallback
+      videoRef.current.poster = currentFeature.fallbackImage;
+      
       setTimeout(() => {
         if (videoRef.current) {
-          videoRef.current.src = currentFeature.videoUrl;
-          videoRef.current.load();
-          
-          // Set poster as fallback
-          videoRef.current.poster = currentFeature.fallbackImage;
-          
-          // Make sure the video is visible
-          videoRef.current.style.display = 'block';
-          
-          // Clean up any overlays
-          cleanupOverlays();
+          try {
+            videoRef.current.src = currentFeature.videoUrl;
+            videoRef.current.load();
+            
+            // Set poster as fallback
+            videoRef.current.poster = currentFeature.fallbackImage;
+            
+            // Make sure the video is visible
+            videoRef.current.style.display = 'block';
+            
+            // Clean up any overlays
+            cleanupOverlays();
+          } catch (err) {
+            console.error("Failed to set video source:", err);
+            useImageFallback();
+          }
         }
       }, 100);
     }
@@ -128,11 +137,16 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
         });
         animateEffect();
       } else {
-        if (videoRef.current.pause) {
+        if (videoRef.current && typeof videoRef.current.pause === 'function') {
           videoRef.current.pause();
         }
         if (animationFrameRef.current) {
           cancelAnimationFrame(animationFrameRef.current);
+        }
+        
+        // If there's an error and we're not already showing the fallback
+        if ((loadError || backupLoadError) && videoRef.current) {
+          useImageFallback();
         }
       }
     }
@@ -227,7 +241,7 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
         
         // Draw loading text or status
         ctx.font = "16px Arial";
-        ctx.fillText(loadError ? "Using fallback preview" : "Preview loading...", canvas.width / 2, canvas.height / 2 + 15);
+        ctx.fillText(loadError || backupLoadError ? "Using fallback preview" : "Preview loading...", canvas.width / 2, canvas.height / 2 + 15);
       }
       
       // Draw simplified feature effect even without video
@@ -668,7 +682,7 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
     const parent = videoRef.current.parentElement;
     if (parent) {
       // Check if we already added an overlay
-      let overlay = parent.querySelector('.fallback-overlay');
+      let overlay = parent.querySelector('.fallback-overlay') as HTMLElement | null;
       if (!overlay) {
         overlay = document.createElement('div');
         overlay.className = 'fallback-overlay absolute inset-0 flex items-center justify-center bg-gray-800/50';
@@ -717,55 +731,61 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       // Set a short timeout to ensure the previous video is unloaded
       setTimeout(() => {
         if (videoRef.current) {
-          // Try the backup video
-          videoRef.current.src = currentFeature.backupVideoUrl;
-          videoRef.current.load();
-          
-          // Use promise-based approach for backup video handling
-          const playPromise = new Promise((resolve) => {
-            if (videoRef.current) {
-              const handleBackupLoad = () => {
-                console.log("Backup video loaded");
-                setVideoLoaded(true);
-                resolve(true);
-                videoRef.current?.removeEventListener('loadeddata', handleBackupLoad);
-              };
-              
-              videoRef.current.addEventListener('loadeddata', handleBackupLoad);
-              
-              // Set a timeout to handle cases where the event doesn't fire
-              setTimeout(() => {
-                if (!videoLoaded) {
-                  console.log("Backup video load timeout");
-                  resolve(false);
-                }
-              }, 5000);
-            } else {
-              resolve(false);
-            }
-          });
-          
-          // Handle backup video playback
-          playPromise.then((loaded) => {
-            if (loaded && videoRef.current && isPlaying) {
-              videoRef.current.play().catch((err) => {
-                console.error("Failed to play backup video:", err);
+          try {
+            // Try the backup video
+            videoRef.current.src = currentFeature.backupVideoUrl;
+            videoRef.current.load();
+            
+            // Use promise-based approach for backup video handling
+            const playPromise = new Promise<boolean>((resolve) => {
+              if (videoRef.current) {
+                const handleBackupLoad = () => {
+                  console.log("Backup video loaded");
+                  setVideoLoaded(true);
+                  resolve(true);
+                  videoRef.current?.removeEventListener('loadeddata', handleBackupLoad);
+                };
+                
+                videoRef.current.addEventListener('loadeddata', handleBackupLoad);
+                
+                // Set a timeout to handle cases where the event doesn't fire
+                setTimeout(() => {
+                  if (!videoLoaded) {
+                    console.log("Backup video load timeout");
+                    resolve(false);
+                  }
+                }, 5000);
+              } else {
+                resolve(false);
+              }
+            });
+            
+            // Handle backup video playback
+            playPromise.then((loaded) => {
+              if (loaded && videoRef.current && isPlaying) {
+                videoRef.current.play().catch((err) => {
+                  console.error("Failed to play backup video:", err);
+                  setBackupLoadError(true);
+                  useImageFallback();
+                });
+              } else {
                 setBackupLoadError(true);
                 useImageFallback();
-              });
-            } else {
-              setBackupLoadError(true);
-              useImageFallback();
+              }
+            });
+            
+            // Handle backup video error with dedicated error listener
+            if (videoRef.current) {
+              videoRef.current.onerror = () => {
+                console.error("Backup video error");
+                setBackupLoadError(true);
+                useImageFallback();
+              };
             }
-          });
-          
-          // Handle backup video error with dedicated error listener
-          if (videoRef.current) {
-            videoRef.current.onerror = () => {
-              console.error("Backup video error");
-              setBackupLoadError(true);
-              useImageFallback();
-            };
+          } catch (err) {
+            console.error("Error setting backup video:", err);
+            setBackupLoadError(true);
+            useImageFallback();
           }
         }
       }, 300);
