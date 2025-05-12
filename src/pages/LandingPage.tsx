@@ -17,6 +17,7 @@ import InteractiveFeatureDemo from '../components/landing/InteractiveFeatureDemo
 import FloatingIconsButton from '../components/landing/FloatingIconsButton';
 import AnimatedFeatureCards from '../components/landing/AnimatedFeatureCards';
 import AnimatedFeatureTiles from '../components/landing/AnimatedFeatureTiles';
+import ComprehensiveFeatureSetExplainer from '../components/landing/ComprehensiveFeatureSetExplainer';
 
 const LandingPage = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -444,6 +445,9 @@ const LandingPage = () => {
       
       {/* Comprehensive Feature List */}
       <FeaturesList />
+      
+      {/* Comprehensive Feature Set Explainer */}
+      <ComprehensiveFeatureSetExplainer />
       
       {/* Feature Highlights */}
       <div className="py-24 bg-gray-50">
