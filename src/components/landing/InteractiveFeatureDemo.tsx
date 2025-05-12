@@ -13,6 +13,7 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
   const [activeFeature, setActiveFeature] = useState(initialFeature);
   const [isPlaying, setIsPlaying] = useState(true);
   const [intensity, setIntensity] = useState(50);
+  const [videoLoaded, setVideoLoaded] = useState(false);
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -24,7 +25,8 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       id: 'face-detection',
       name: 'Face Detection',
       icon: Camera,
-      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-woman-taking-selfies-while-smiling-43130-large.mp4',
+      // Using different video URL that's more likely to be available
+      videoUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4',
       fallbackImage: 'https://images.unsplash.com/photo-1590031905407-86afa9c32411?auto=format&fit=crop&w=800&q=80',
       description: 'Detect and track faces in real-time with precision'
     },
@@ -32,7 +34,8 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       id: 'facial-landmarks',
       name: 'Facial Landmarks',
       icon: Scan,
-      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-talking-looking-at-camera-43786-large.mp4',
+      // Using different video URL that's more likely to be available
+      videoUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
       fallbackImage: 'https://images.unsplash.com/photo-1546458904-143d1674858d?auto=format&fit=crop&w=800&q=80',
       description: 'Track 468 facial points for advanced effects'
     },
@@ -40,7 +43,8 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       id: 'background-removal',
       name: 'Background Removal',
       icon: Trash2,
-      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-talking-in-a-video-call-44774-large.mp4',
+      // Using different video URL that's more likely to be available
+      videoUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
       fallbackImage: 'https://images.unsplash.com/photo-1543269664-7eef42226a21?auto=format&fit=crop&w=800&q=80',
       description: 'Remove background without a green screen'
     },
@@ -48,7 +52,8 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       id: 'background-blur',
       name: 'Background Blur',
       icon: Layers,
-      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-vlogging-about-her-new-year-resolutions-47022-large.mp4',
+      // Using different video URL that's more likely to be available
+      videoUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
       fallbackImage: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&w=800&q=80',
       description: 'Apply professional blur effect to background'
     },
@@ -56,7 +61,8 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       id: 'beautification',
       name: 'Beautification',
       icon: Sparkles,
-      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-portrait-of-a-young-model-posing-during-a-shoot-43929-large.mp4',
+      // Using different video URL that's more likely to be available
+      videoUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
       fallbackImage: 'https://images.unsplash.com/photo-1487412947147-5cebf100ffc2?auto=format&fit=crop&w=800&q=80',
       description: 'Enhance appearance with AI-powered filters'
     }
@@ -67,6 +73,9 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
   
   useEffect(() => {
     if (videoRef.current) {
+      // Reset video loaded state
+      setVideoLoaded(false);
+      
       // Load new video when feature changes
       videoRef.current.src = currentFeature.videoUrl;
       videoRef.current.load();
@@ -77,25 +86,30 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       // Add error handler
       const handleError = () => {
         console.error(`Error loading video for ${currentFeature.name}`);
+        
+        // Update UI with fallback
         if (videoRef.current) {
+          // Ensure poster is set
           videoRef.current.poster = currentFeature.fallbackImage;
           
-          // Create a div that shows we're using fallback
-          const parent = videoRef.current.parentElement;
-          if (parent) {
-            // Check if error message already exists
-            const existingMsg = parent.querySelector('.video-error-msg');
-            if (!existingMsg) {
-              const errorMsg = document.createElement('div');
-              errorMsg.className = 'absolute bottom-4 right-4 px-2 py-1 bg-black/50 text-white rounded text-xs video-error-msg';
-              errorMsg.textContent = 'Using preview image';
-              parent.appendChild(errorMsg);
-            }
+          // Set up the error state
+          setVideoLoaded(false);
+          
+          // Make sure the video element itself is visible
+          if (videoRef.current.style.display === 'none') {
+            videoRef.current.style.display = 'block';
           }
         }
       };
       
+      // Add load success handler
+      const handleLoadedData = () => {
+        setVideoLoaded(true);
+      };
+      
+      // Set up event listeners
       videoRef.current.onerror = handleError;
+      videoRef.current.onloadeddata = handleLoadedData;
       
       if (isPlaying) {
         videoRef.current.play().catch(handleError);
@@ -106,23 +120,29 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
     setupCanvas();
     
     return () => {
-      cancelAnimationFrame(animationFrameRef.current!);
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
     };
   }, [activeFeature, currentFeature.videoUrl]);
   
   useEffect(() => {
     if (videoRef.current) {
-      if (isPlaying) {
-        videoRef.current.play().catch(() => {
-          // If play fails, we'll just show the poster/fallback
+      if (isPlaying && videoLoaded) {
+        videoRef.current.play().catch((err) => {
+          console.error("Error playing video:", err);
+          // If autoplay is blocked, we'll just show the poster/fallback
+          setVideoLoaded(false);
         });
         animateEffect();
       } else {
-        videoRef.current.pause();
+        if (videoRef.current.pause) {
+          videoRef.current.pause();
+        }
         cancelAnimationFrame(animationFrameRef.current!);
       }
     }
-  }, [isPlaying]);
+  }, [isPlaying, videoLoaded]);
   
   const setupCanvas = () => {
     if (!canvasRef.current || !videoRef.current) return;
@@ -130,10 +150,14 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
     const canvas = canvasRef.current;
     const video = videoRef.current;
     
+    // Set initial canvas dimensions
+    canvas.width = canvas.clientWidth;
+    canvas.height = canvas.clientHeight;
+    
     // Ensure canvas matches video size on load
     video.onloadedmetadata = () => {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+      canvas.width = video.videoWidth || canvas.clientWidth;
+      canvas.height = video.videoHeight || canvas.clientHeight;
     };
     
     // Start animation
@@ -143,11 +167,10 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
   };
   
   const animateEffect = () => {
-    if (!canvasRef.current || !videoRef.current) return;
+    if (!canvasRef.current) return;
     
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
-    const video = videoRef.current;
     
     if (!ctx) return;
     
@@ -155,8 +178,9 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
     // First draw video frame or fallback
-    if (video.readyState >= 2) {
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    if (videoRef.current && videoRef.current.readyState >= 2) {
+      // Video is ready and can be drawn
+      ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
       
       // Apply effect based on current feature
       switch (activeFeature) {
@@ -177,19 +201,136 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
           break;
       }
     } else {
-      // Draw placeholder/loading state if video not ready
-      ctx.fillStyle = "#1a202c"; // Dark background
+      // Video not ready yet, draw fallback with nice gradient
+      const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+      gradient.addColorStop(0, "#1a202c");
+      gradient.addColorStop(1, "#2d3748");
+      ctx.fillStyle = gradient;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       
-      // Draw loading text
-      ctx.fillStyle = "#ffffff";
-      ctx.font = "16px Arial";
-      ctx.textAlign = "center";
-      ctx.fillText("Loading demo...", canvas.width / 2, canvas.height / 2);
+      // If we have the feature info, show that
+      if (currentFeature) {
+        // Draw feature name
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "20px Arial";
+        ctx.textAlign = "center";
+        ctx.fillText(currentFeature.name, canvas.width / 2, canvas.height / 2 - 15);
+        
+        // Draw loading text or status
+        ctx.font = "16px Arial";
+        ctx.fillText("Preview loading...", canvas.width / 2, canvas.height / 2 + 15);
+      }
+      
+      // Draw simplified feature effect even without video
+      switch (activeFeature) {
+        case 'face-detection':
+          drawSimplifiedFaceDetection(ctx, intensity);
+          break;
+        case 'facial-landmarks':
+          drawSimplifiedFacialLandmarks(ctx, intensity);
+          break;
+        case 'background-removal':
+          drawSimplifiedBackgroundRemoval(ctx, intensity);
+          break;
+        case 'background-blur':
+          // Default visualization is fine
+          break;
+        case 'beautification':
+          // Default visualization is fine
+          break;
+      }
     }
     
     // Schedule next frame
     animationFrameRef.current = requestAnimationFrame(animateEffect);
+  };
+  
+  // Simplified effect drawings when video isn't available
+  const drawSimplifiedFaceDetection = (ctx: CanvasRenderingContext2D, intensity: number) => {
+    const strength = intensity / 100;
+    const centerX = ctx.canvas.width / 2;
+    const centerY = ctx.canvas.height / 2;
+    
+    // Draw oval for face
+    ctx.strokeStyle = `rgba(228, 78, 81, ${strength})`;
+    ctx.lineWidth = 3 * strength;
+    ctx.beginPath();
+    ctx.ellipse(centerX, centerY, 80, 100, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    
+    // Draw text
+    ctx.fillStyle = `rgba(228, 78, 81, ${strength})`;
+    ctx.font = `${Math.round(14 * strength)}px Arial`;
+    ctx.textAlign = "center";
+    ctx.fillText("Face Detected", centerX, centerY - 120);
+  };
+  
+  const drawSimplifiedFacialLandmarks = (ctx: CanvasRenderingContext2D, intensity: number) => {
+    const strength = intensity / 100;
+    const centerX = ctx.canvas.width / 2;
+    const centerY = ctx.canvas.height / 2;
+    
+    // Draw face outline
+    ctx.strokeStyle = `rgba(0, 255, 255, ${strength * 0.7})`;
+    ctx.lineWidth = 1 * strength;
+    ctx.beginPath();
+    ctx.ellipse(centerX, centerY, 80, 100, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    
+    // Draw some facial landmark dots
+    ctx.fillStyle = `rgba(228, 78, 81, ${strength})`;
+    
+    // Draw eyes
+    ctx.beginPath();
+    ctx.ellipse(centerX - 25, centerY - 20, 10, 5, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    
+    ctx.beginPath();
+    ctx.ellipse(centerX + 25, centerY - 20, 10, 5, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    
+    // Draw mouth
+    ctx.beginPath();
+    ctx.ellipse(centerX, centerY + 30, 20, 10, 0, 0, Math.PI);
+    ctx.stroke();
+    
+    // Draw dots for landmarks
+    const landmarks = 20;
+    for (let i = 0; i < landmarks; i++) {
+      const angle = (i / landmarks) * Math.PI * 2;
+      const x = centerX + Math.cos(angle) * 80;
+      const y = centerY + Math.sin(angle) * 100;
+      
+      ctx.beginPath();
+      ctx.arc(x, y, 2 * strength, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  };
+  
+  const drawSimplifiedBackgroundRemoval = (ctx: CanvasRenderingContext2D, intensity: number) => {
+    const strength = intensity / 100;
+    const centerX = ctx.canvas.width / 2;
+    const centerY = ctx.canvas.height / 2;
+    
+    // Draw green background
+    ctx.fillStyle = `rgba(0, 255, 0, ${0.3 * strength})`;
+    ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    
+    // Draw person silhouette
+    ctx.fillStyle = `rgba(0, 0, 0, ${0.8 * strength})`;
+    ctx.beginPath();
+    ctx.ellipse(centerX, centerY - 30, 40, 50, 0, 0, Math.PI * 2);
+    ctx.fill();
+    
+    ctx.beginPath();
+    ctx.ellipse(centerX, centerY + 70, 60, 100, 0, 0, Math.PI);
+    ctx.fill();
+    
+    // Add text
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "14px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText("Background Removed", centerX, centerY - 100);
   };
   
   // Effect drawing functions
@@ -214,6 +355,7 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
     // Draw confidence text
     ctx.fillStyle = `rgba(228, 78, 81, ${strength})`;
     ctx.font = `${Math.round(12 * strength)}px Arial`;
+    ctx.textAlign = "left";
     ctx.fillText(
       `${Math.round(intensity)}% confidence`, 
       centerX - boxWidth/2, 
@@ -362,6 +504,7 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
     // Add "Background Removed" indicator
     ctx.fillStyle = `rgba(228, 78, 81, ${strength})`;
     ctx.font = '14px Arial';
+    ctx.textAlign = "left";
     ctx.fillText(`Background Removed: ${Math.round(intensity)}%`, 20, 30);
   };
   
@@ -447,6 +590,7 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
     // Add "Background Blur" indicator
     ctx.fillStyle = `rgba(228, 78, 81, ${strength})`;
     ctx.font = '14px Arial';
+    ctx.textAlign = "left";
     ctx.fillText(`Background Blur: ${Math.round(intensity)}%`, 20, 30);
   };
   
@@ -468,6 +612,7 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
     // Add "Beautification" indicator
     ctx.fillStyle = `rgba(228, 78, 81, ${strength})`;
     ctx.font = '14px Arial';
+    ctx.textAlign = "left";
     ctx.fillText(`Beautification: ${Math.round(intensity)}%`, 20, 30);
     
     // Draw face highlight
@@ -481,11 +626,29 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
     ctx.stroke();
   };
   
-  // Handle video error
+  // Handle video loading
+  const handleVideoLoad = () => {
+    setVideoLoaded(true);
+  };
+  
+  // Handle video error with more robust error handling
   const handleVideoError = () => {
     console.error(`Error loading video for ${currentFeature.name}`);
+    
+    // Set video loaded to false to show fallback
+    setVideoLoaded(false);
+    
+    // Make sure poster is set
     if (videoRef.current) {
       videoRef.current.poster = currentFeature.fallbackImage;
+      
+      // Make sure the video element is visible despite errors
+      videoRef.current.style.display = 'block';
+    }
+    
+    // Continue with animation effect even without video
+    if (isPlaying) {
+      animateEffect();
     }
   };
 
@@ -580,13 +743,13 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
           <div className="relative aspect-video bg-black rounded-lg overflow-hidden shadow-lg">
             <video 
               ref={videoRef}
-              src={currentFeature.videoUrl}
               className="absolute inset-0 w-full h-full object-cover"
               autoPlay={isPlaying}
               loop
               muted
               poster={currentFeature.fallbackImage}
               onError={handleVideoError}
+              onLoadedData={handleVideoLoad}
             ></video>
             
             <canvas 
@@ -598,6 +761,12 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
               <currentFeature.icon className="w-4 h-4" />
               <span>{currentFeature.name}</span>
             </div>
+            
+            {!videoLoaded && (
+              <div className="absolute right-4 bottom-4 bg-black/60 text-white text-xs py-1 px-2 rounded">
+                Using fallback preview
+              </div>
+            )}
           </div>
           
           <div className="mt-4 text-center text-sm text-gray-500">
