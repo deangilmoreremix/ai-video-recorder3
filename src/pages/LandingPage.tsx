@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { motion, useScroll, useTransform, useAnimation } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { Play, Camera, Brain, Wand2, Film, Download, Sparkles, Scissors, Type, Clock, Layout, ChevronRight, Layers } from 'lucide-react';
@@ -13,12 +13,14 @@ import FeatureHighlight from '../components/landing/FeatureHighlight';
 import Testimonials from '../components/landing/Testimonials';
 import FloatingIcons from '../components/landing/FloatingIcons';
 import FeaturesList from '../components/landing/FeaturesList';
+import InteractiveFeatureDemo from '../components/landing/InteractiveFeatureDemo';
 
 const LandingPage = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const heroRef = useRef<HTMLDivElement>(null);
   const recordingAnimation = useRef<HTMLDivElement>(null);
   const editorAnimation = useRef<HTMLDivElement>(null);
+  const [activeDemo, setActiveDemo] = useState('face-detection');
   
   const { scrollYProgress } = useScroll();
   const y = useTransform(scrollYProgress, [0, 1], ['0%', '100%']);
@@ -331,43 +333,13 @@ const LandingPage = () => {
           
           {/* Interactive Features Demo */}
           <motion.div
-            className="mt-24 bg-white shadow-xl rounded-2xl p-8 border border-gray-100"
+            className="mt-24"
             initial={{ opacity: 0, y: 40 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true, margin: "-50px" }}
             transition={{ duration: 0.8 }}
           >
-            <div className="text-center mb-8">
-              <h3 className="text-2xl font-bold text-gray-900">Interactive Demo</h3>
-              <p className="mt-2 text-gray-600">Try out some of our features directly in your browser</p>
-            </div>
-            
-            <div className="aspect-video bg-gray-900 rounded-lg relative overflow-hidden">
-              <video 
-                className="w-full h-full object-cover" 
-                src="https://assets.mixkit.co/videos/preview/mixkit-person-in-a-video-call-meeting-online-513-large.mp4" 
-                autoPlay 
-                loop 
-                muted
-              ></video>
-              
-              <div className="absolute top-4 right-4">
-                <div className="flex space-x-2">
-                  <button className="p-2 bg-black/50 text-white rounded-full hover:bg-[#E44E51]/80 transition-colors">
-                    <Layers className="w-5 h-5" />
-                  </button>
-                  <button className="p-2 bg-black/50 text-white rounded-full hover:bg-[#E44E51]/80 transition-colors">
-                    <Wand2 className="w-5 h-5" />
-                  </button>
-                </div>
-              </div>
-              
-              <div className="absolute bottom-4 left-4">
-                <div className="px-3 py-1 bg-[#E44E51] text-white rounded-full text-sm">
-                  AI beauty filter active
-                </div>
-              </div>
-            </div>
+            <InteractiveFeatureDemo initialFeature={activeDemo} />
           </motion.div>
         </div>
       </div>
