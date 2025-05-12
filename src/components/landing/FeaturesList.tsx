@@ -1,10 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   Camera, Brain, Scissors, Type, Clock, Layout, Film, Download, Sparkles,
   Wand2, Layers, Mic, Volume2, Palette, Gauge, Smile, HandMetal,
   Maximize2, Send, Trash2, Focus, Monitor, Grid, Sliders, Zap,
-  Video, ChevronRight, Scan, Share, Image
+  Video, ChevronRight, Scan, Share2, Image
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -16,6 +16,8 @@ interface Feature {
 }
 
 const FeaturesList: React.FC = () => {
+  const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
+
   // Define all features
   const allFeatures: Feature[] = [
     // AI Features
@@ -166,7 +168,7 @@ const FeaturesList: React.FC = () => {
     {
       title: 'Social Media Optimization',
       description: 'Optimize videos for different social platforms',
-      icon: Share,
+      icon: Share2,
       category: 'export'
     },
     {
@@ -224,7 +226,7 @@ const FeaturesList: React.FC = () => {
     visible: {
       opacity: 1,
       transition: {
-        staggerChildren: 0.1
+        staggerChildren: 0.05
       }
     }
   };
@@ -233,7 +235,18 @@ const FeaturesList: React.FC = () => {
     hidden: { y: 20, opacity: 0 },
     visible: {
       y: 0,
-      opacity: 1
+      opacity: 1,
+      transition: {
+        duration: 0.3
+      }
+    }
+  };
+
+  const toggleCategory = (categoryId: string) => {
+    if (expandedCategory === categoryId) {
+      setExpandedCategory(null);
+    } else {
+      setExpandedCategory(categoryId);
     }
   };
 
@@ -261,54 +274,81 @@ const FeaturesList: React.FC = () => {
           </motion.p>
         </div>
         
-        <div className="space-y-20">
+        <div className="space-y-12">
           {categories.map((category) => {
             const categoryFeatures = allFeatures.filter(feature => feature.category === category.id);
             const CategoryIcon = category.icon;
+            const isExpanded = expandedCategory === category.id;
             
             return (
-              <div key={category.id} className="space-y-8">
-                <div className="flex items-center space-x-4">
-                  <div className="w-12 h-12 rounded-full bg-[#E44E51]/10 flex items-center justify-center">
-                    <CategoryIcon className="h-6 w-6 text-[#E44E51]" />
+              <div key={category.id} className="space-y-6">
+                <motion.div 
+                  className="flex items-center space-x-4 cursor-pointer"
+                  onClick={() => toggleCategory(category.id)}
+                  whileHover={{ x: 5 }}
+                  transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+                >
+                  <div className="w-14 h-14 rounded-full bg-[#E44E51]/10 flex items-center justify-center">
+                    <CategoryIcon className="h-7 w-7 text-[#E44E51]" />
                   </div>
                   <div>
                     <h3 className="text-2xl font-bold text-gray-900">{category.title}</h3>
-                    <Link 
-                      to={category.path}
-                      className="text-[#E44E51] flex items-center hover:underline mt-1"
-                    >
-                      <span>Explore all {category.title.toLowerCase()}</span>
-                      <ChevronRight className="w-4 h-4 ml-1" />
-                    </Link>
+                    <div className="flex items-center mt-1">
+                      <span className="text-[#E44E51]">
+                        {isExpanded ? "Hide features" : `View all ${categoryFeatures.length} features`}
+                      </span>
+                      <ChevronRight 
+                        className={`w-4 h-4 ml-1 text-[#E44E51] transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                      />
+                    </div>
                   </div>
-                </div>
-                
-                <motion.div 
-                  className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6"
-                  variants={containerVariants}
-                  initial="hidden"
-                  whileInView="visible"
-                  viewport={{ once: true, margin: "-100px" }}
-                >
-                  {categoryFeatures.map((feature, index) => {
-                    const FeatureIcon = feature.icon;
-                    
-                    return (
-                      <motion.div 
-                        key={`${category.id}-${index}`}
-                        className="bg-white rounded-xl shadow-sm p-6 border border-gray-100 hover:shadow-md transition-shadow"
-                        variants={itemVariants}
-                      >
-                        <div className={`w-10 h-10 rounded-full bg-[#E44E51]/10 flex items-center justify-center mb-4`}>
-                          <FeatureIcon className="w-5 h-5 text-[#E44E51]" />
-                        </div>
-                        <h3 className="text-lg font-semibold text-gray-900 mb-2">{feature.title}</h3>
-                        <p className="text-sm text-gray-600">{feature.description}</p>
-                      </motion.div>
-                    );
-                  })}
                 </motion.div>
+                
+                <motion.div
+                  initial={false}
+                  animate={{ 
+                    height: isExpanded ? 'auto' : 0,
+                    opacity: isExpanded ? 1 : 0
+                  }}
+                  transition={{ duration: 0.3 }}
+                  className="overflow-hidden"
+                >
+                  {isExpanded && (
+                    <motion.div 
+                      className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mt-6"
+                      variants={containerVariants}
+                      initial="hidden"
+                      animate="visible"
+                    >
+                      {categoryFeatures.map((feature, index) => {
+                        const FeatureIcon = feature.icon;
+                        
+                        return (
+                          <motion.div 
+                            key={`${category.id}-${index}`}
+                            className="bg-white rounded-xl shadow-sm p-6 border border-gray-100 hover:shadow-md transition-shadow hover:border-[#E44E51]/30"
+                            variants={itemVariants}
+                            whileHover={{ y: -5, boxShadow: '0px 10px 20px rgba(0, 0, 0, 0.05)' }}
+                          >
+                            <div className={`w-10 h-10 rounded-full bg-[#E44E51]/10 flex items-center justify-center mb-4`}>
+                              <FeatureIcon className="w-5 h-5 text-[#E44E51]" />
+                            </div>
+                            <h3 className="text-lg font-semibold text-gray-900 mb-2">{feature.title}</h3>
+                            <p className="text-sm text-gray-600">{feature.description}</p>
+                          </motion.div>
+                        );
+                      })}
+                    </motion.div>
+                  )}
+                </motion.div>
+                
+                <Link 
+                  to={category.path}
+                  className="inline-flex items-center text-[#E44E51] font-medium hover:underline mt-2"
+                >
+                  <span>Explore all {category.title.toLowerCase()}</span>
+                  <ChevronRight className="w-4 h-4 ml-1" />
+                </Link>
               </div>
             );
           })}
