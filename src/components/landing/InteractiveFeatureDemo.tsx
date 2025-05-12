@@ -20,16 +20,16 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationFrameRef = useRef<number>();
   
-  // Features data with backup video URLs in case primary ones fail
+  // Features data with reliable video URLs
   const features = [
     {
       id: 'face-detection',
       name: 'Face Detection',
       icon: Camera,
-      // Primary video URL
-      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-working-on-laptop-in-office-space-42905-large.mp4',
-      // Backup video URL from a different source
-      backupVideoUrl: 'https://cdn.pixabay.com/vimeo/529588647/face-73127.mp4?width=640&hash=b8fd9a0c0c77ff8c8af1a0f1caa59be7f0c12e62',
+      // Use Mixkit videos which are free for commercial and personal use
+      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-talking-in-the-street-on-a-summers-day-41719-large.mp4',
+      // Backup video - another reliable source 
+      backupVideoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-business-woman-nodding-agreement-and-explaining-something-while-having-a-41722-large.mp4',
       fallbackImage: 'https://images.unsplash.com/photo-1590031905407-86afa9c32411?auto=format&fit=crop&w=800&q=80',
       description: 'Detect and track faces in real-time with precision'
     },
@@ -37,8 +37,8 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       id: 'facial-landmarks',
       name: 'Facial Landmarks',
       icon: Scan,
-      videoUrl: 'https://player.vimeo.com/external/469885756.sd.mp4?s=d7cac9bd8c7b67a17d59eb4af33c740873ca78b3&profile_id=165&oauth2_token_id=57447761',
-      backupVideoUrl: 'https://cdn.pixabay.com/vimeo/186886273/woman-5541.mp4?width=640&hash=8a972f4ea39ebae65383e9d8e4432a98b89877c4',
+      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-happy-woman-winking-outside-45292-large.mp4',
+      backupVideoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-talking-happily-on-her-phone-with-a-friend-12167-large.mp4',
       fallbackImage: 'https://images.unsplash.com/photo-1546458904-143d1674858d?auto=format&fit=crop&w=800&q=80',
       description: 'Track 468 facial points for advanced effects'
     },
@@ -46,8 +46,8 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       id: 'background-removal',
       name: 'Background Removal',
       icon: Trash2,
-      videoUrl: 'https://player.vimeo.com/external/498927069.sd.mp4?s=72e78348da74a29704be555406aa579c2263bce1&profile_id=165&oauth2_token_id=57447761',
-      backupVideoUrl: 'https://cdn.pixabay.com/vimeo/330517967/people-20889.mp4?width=640&hash=d1e949af6e14bee0a9cbe87757f0bcf55fa52413',
+      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-standing-up-as-a-helicopter-passes-40910-large.mp4',
+      backupVideoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-walking-under-umbrellas-decorations-34637-large.mp4',
       fallbackImage: 'https://images.unsplash.com/photo-1543269664-7eef42226a21?auto=format&fit=crop&w=800&q=80',
       description: 'Remove background without a green screen'
     },
@@ -55,8 +55,8 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       id: 'background-blur',
       name: 'Background Blur',
       icon: Layers,
-      videoUrl: 'https://player.vimeo.com/external/534342299.sd.mp4?s=4b5dbc3e4d834e0b6e17a37a3e07979467e09fda&profile_id=165&oauth2_token_id=57447761',
-      backupVideoUrl: 'https://cdn.pixabay.com/vimeo/190846314/person-6633.mp4?width=640&hash=0042d80be1fcb5b65c8f7c519b3c3a7b4dd30f84',
+      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-woman-walking-under-the-sakura-flowery-trees-4956-large.mp4',
+      backupVideoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-girl-walks-under-an-orange-umbrella-4821-large.mp4',
       fallbackImage: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&w=800&q=80',
       description: 'Apply professional blur effect to background'
     },
@@ -64,8 +64,8 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       id: 'beautification',
       name: 'Beautification',
       icon: Sparkles,
-      videoUrl: 'https://player.vimeo.com/external/403970080.sd.mp4?s=72dae3fe3fa91bcf9a1d6fe51fee5ad630091d46&profile_id=165&oauth2_token_id=57447761',
-      backupVideoUrl: 'https://cdn.pixabay.com/vimeo/694200272/face-128976.mp4?width=640&hash=46e1e6449f9c911c8bf3c7c67f9cb1b1bfb42e20',
+      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-woman-with-a-lighted-candle-looking-at-the-camera-39958-large.mp4',
+      backupVideoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-walking-in-the-countryside-45666-large.mp4',
       fallbackImage: 'https://images.unsplash.com/photo-1487412947147-5cebf100ffc2?auto=format&fit=crop&w=800&q=80',
       description: 'Enhance appearance with AI-powered filters'
     }
@@ -124,6 +124,37 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
           }
           
           setVideoLoaded(false);
+          
+          // Add an overlay div with the feature icon for better visual feedback
+          const parent = videoRef.current.parentElement;
+          if (parent) {
+            // Check if we already added an overlay
+            let overlay = parent.querySelector('.fallback-overlay');
+            if (!overlay) {
+              overlay = document.createElement('div');
+              overlay.className = 'fallback-overlay absolute inset-0 flex items-center justify-center bg-gray-800/50';
+              
+              const Icon = currentFeature.icon;
+              const iconName = Icon.name || 'Icon';
+              
+              overlay.innerHTML = `
+                <div class="text-center text-white">
+                  <div class="w-16 h-16 mx-auto mb-4 rounded-full bg-gray-700/50 flex items-center justify-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white">
+                      ${iconName === 'Camera' ? '<rect x="2" y="2" width="20" height="20" rx="2" ry="2"></rect><circle cx="12" y="12" r="4"></circle>' : 
+                        iconName === 'Scan' ? '<path d="M21 12V7.5a2.5 2.5 0 0 0-2.5-2.5H16"></path><path d="M3 12v4.5a2.5 2.5 0 0 0 2.5 2.5H9"></path><path d="M3 12V7.5A2.5 2.5 0 0 1 5.5 5H9"></path><path d="M21 12v4.5a2.5 2.5 0 0 1-2.5 2.5H16"></path><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line>' : 
+                        iconName === 'Trash2' ? '<polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line>' : 
+                        iconName === 'Layers' ? '<polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline>' : 
+                        '<circle cx="12" cy="12" r="10"></circle><path d="m9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line>'}
+                    </svg>
+                  </div>
+                  <p>${currentFeature.name}</p>
+                  <p class="text-sm opacity-80">Preview not available</p>
+                </div>
+              `;
+              parent.appendChild(overlay);
+            }
+          }
         }
       };
       
@@ -131,6 +162,15 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       const handleLoadedData = () => {
         setVideoLoaded(true);
         setLoadError(false); // Reset error state on successful load
+        
+        // Remove any overlay if it exists
+        const parent = videoRef.current?.parentElement;
+        if (parent) {
+          const overlay = parent.querySelector('.fallback-overlay');
+          if (overlay) {
+            parent.removeChild(overlay);
+          }
+        }
       };
       
       // Set up event listeners
@@ -148,6 +188,17 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
     return () => {
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
+      }
+      
+      // Clean up any overlays
+      if (videoRef.current) {
+        const parent = videoRef.current.parentElement;
+        if (parent) {
+          const overlay = parent.querySelector('.fallback-overlay');
+          if (overlay) {
+            parent.removeChild(overlay);
+          }
+        }
       }
     };
   }, [activeFeature]);
@@ -656,11 +707,21 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
   
   // Handle video loading
   const handleVideoLoad = () => {
+    console.log("Video loaded successfully:", currentFeature.name);
     setVideoLoaded(true);
     setLoadError(false);
+    
+    // Remove any error overlays that might be present
+    const parent = videoRef.current?.parentElement;
+    if (parent) {
+      const overlay = parent.querySelector('.fallback-overlay');
+      if (overlay) {
+        parent.removeChild(overlay);
+      }
+    }
   };
   
-  // Handle video error with more robust error handling
+  // Handle video error with improved error handling
   const handleVideoError = () => {
     console.error(`Error loading video for ${currentFeature.name}`);
     
@@ -676,11 +737,27 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
         videoRef.current.play().catch(err => {
           console.error("Failed to play backup video:", err);
           // Final fallback to image
-          setVideoLoaded(false);
+          useImageFallback();
         });
       }
     } else {
       // If backup also failed or there's no backup, use the image fallback
+      useImageFallback();
+    }
+  };
+  
+  // Function to handle fallback to image
+  const useImageFallback = () => {
+    console.log(`Using image fallback for ${currentFeature.name}`);
+    // Ensure video element has the right poster image
+    if (videoRef.current) {
+      videoRef.current.poster = currentFeature.fallbackImage;
+      
+      // Make sure the video element itself is visible
+      if (videoRef.current.style.display === 'none') {
+        videoRef.current.style.display = 'block';
+      }
+      
       setVideoLoaded(false);
     }
   };
@@ -797,7 +874,7 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
             
             {!videoLoaded && (
               <div className="absolute right-4 bottom-4 bg-black/60 text-white text-xs py-1 px-2 rounded">
-                {loadError ? "Using backup preview" : "Using fallback preview"}
+                {loadError ? "Using fallback preview" : "Loading preview..."}
               </div>
             )}
           </div>
