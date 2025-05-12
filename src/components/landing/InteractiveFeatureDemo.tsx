@@ -26,7 +26,7 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       name: 'Face Detection',
       icon: Camera,
       // Updated to a more reliable source
-      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-portrait-of-a-fashion-woman-with-silver-makeup-39875-large.mp4',
+      videoUrl: 'https://player.vimeo.com/external/394678700.sd.mp4?s=353646e34d7bde02456e7695c4171aeec63af891&profile_id=165&oauth2_token_id=57447761',
       fallbackImage: 'https://images.unsplash.com/photo-1590031905407-86afa9c32411?auto=format&fit=crop&w=800&q=80',
       description: 'Detect and track faces in real-time with precision'
     },
@@ -35,7 +35,7 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       name: 'Facial Landmarks',
       icon: Scan,
       // Updated to a more reliable source
-      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-man-under-multicolored-lights-1237-large.mp4',
+      videoUrl: 'https://player.vimeo.com/external/469885756.sd.mp4?s=d7cac9bd8c7b67a17d59eb4af33c740873ca78b3&profile_id=165&oauth2_token_id=57447761',
       fallbackImage: 'https://images.unsplash.com/photo-1546458904-143d1674858d?auto=format&fit=crop&w=800&q=80',
       description: 'Track 468 facial points for advanced effects'
     },
@@ -44,7 +44,7 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       name: 'Background Removal',
       icon: Trash2,
       // Updated to a more reliable source
-      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-going-down-a-curved-highway-through-a-mountain-range-41576-large.mp4',
+      videoUrl: 'https://player.vimeo.com/external/498927069.sd.mp4?s=72e78348da74a29704be555406aa579c2263bce1&profile_id=165&oauth2_token_id=57447761',
       fallbackImage: 'https://images.unsplash.com/photo-1543269664-7eef42226a21?auto=format&fit=crop&w=800&q=80',
       description: 'Remove background without a green screen'
     },
@@ -53,7 +53,7 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       name: 'Background Blur',
       icon: Layers,
       // Updated to a more reliable source
-      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-talking-on-video-call-with-smartphone-40773-large.mp4',
+      videoUrl: 'https://player.vimeo.com/external/534342299.sd.mp4?s=4b5dbc3e4d834e0b6e17a37a3e07979467e09fda&profile_id=165&oauth2_token_id=57447761',
       fallbackImage: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&w=800&q=80',
       description: 'Apply professional blur effect to background'
     },
@@ -62,7 +62,7 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       name: 'Beautification',
       icon: Sparkles,
       // Updated to a more reliable source
-      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-woman-modeling-outdoors-1235-large.mp4',
+      videoUrl: 'https://player.vimeo.com/external/403970080.sd.mp4?s=72dae3fe3fa91bcf9a1d6fe51fee5ad630091d46&profile_id=165&oauth2_token_id=57447761',
       fallbackImage: 'https://images.unsplash.com/photo-1487412947147-5cebf100ffc2?auto=format&fit=crop&w=800&q=80',
       description: 'Enhance appearance with AI-powered filters'
     }
