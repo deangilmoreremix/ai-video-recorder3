@@ -4,7 +4,7 @@ import {
   Camera, Brain, Scissors, Type, Clock, Layout, Film, Download, Sparkles,
   Wand2, Layers, Mic, Volume2, Palette, Gauge, Smile, HandMetal,
   Maximize2, Send, Trash2, Focus, Monitor, Grid, Sliders, Zap,
-  Video, ChevronRight
+  Video, ChevronRight, Scan, Share, Image
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
