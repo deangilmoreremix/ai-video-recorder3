@@ -656,6 +656,11 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
     setVideoLoaded(false);
     setBackupLoadError(true);
     
+    // Hide the video element
+    if (videoRef.current) {
+      videoRef.current.style.display = 'none';
+    }
+    
     // Ensure video element has the right poster image
     videoRef.current.poster = currentFeature.fallbackImage;
     
@@ -704,34 +709,64 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       console.log(`Trying backup video URL for ${currentFeature.name}`);
       
       // Make sure the video is completely stopped before changing source
-      videoRef.current.pause();
-      videoRef.current.removeAttribute('src'); // Completely unload the previous video
+      if (videoRef.current) {
+        videoRef.current.pause();
+        videoRef.current.removeAttribute('src'); // Completely unload the previous video
+      }
       
       // Set a short timeout to ensure the previous video is unloaded
       setTimeout(() => {
         if (videoRef.current) {
+          // Try the backup video
           videoRef.current.src = currentFeature.backupVideoUrl;
           videoRef.current.load();
           
-          // Manually handle the backup video's events
-          const handleBackupLoad = () => {
-            setVideoLoaded(true);
-            if (isPlaying) {
-              videoRef.current?.play().catch(handleBackupError);
+          // Use promise-based approach for backup video handling
+          const playPromise = new Promise((resolve) => {
+            if (videoRef.current) {
+              const handleBackupLoad = () => {
+                console.log("Backup video loaded");
+                setVideoLoaded(true);
+                resolve(true);
+                videoRef.current?.removeEventListener('loadeddata', handleBackupLoad);
+              };
+              
+              videoRef.current.addEventListener('loadeddata', handleBackupLoad);
+              
+              // Set a timeout to handle cases where the event doesn't fire
+              setTimeout(() => {
+                if (!videoLoaded) {
+                  console.log("Backup video load timeout");
+                  resolve(false);
+                }
+              }, 5000);
+            } else {
+              resolve(false);
             }
-            videoRef.current?.removeEventListener('loadeddata', handleBackupLoad);
-          };
+          });
           
-          const handleBackupError = () => {
-            console.error("Failed to play backup video");
-            setBackupLoadError(true);
-            videoRef.current?.removeEventListener('loadeddata', handleBackupLoad);
-            videoRef.current?.removeEventListener('error', handleBackupError);
-            useImageFallback();
-          };
+          // Handle backup video playback
+          playPromise.then((loaded) => {
+            if (loaded && videoRef.current && isPlaying) {
+              videoRef.current.play().catch((err) => {
+                console.error("Failed to play backup video:", err);
+                setBackupLoadError(true);
+                useImageFallback();
+              });
+            } else {
+              setBackupLoadError(true);
+              useImageFallback();
+            }
+          });
           
-          videoRef.current.addEventListener('loadeddata', handleBackupLoad);
-          videoRef.current.addEventListener('error', handleBackupError);
+          // Handle backup video error with dedicated error listener
+          if (videoRef.current) {
+            videoRef.current.onerror = () => {
+              console.error("Backup video error");
+              setBackupLoadError(true);
+              useImageFallback();
+            };
+          }
         }
       }, 300);
     } else {
