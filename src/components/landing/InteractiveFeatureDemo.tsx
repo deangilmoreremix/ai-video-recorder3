@@ -20,6 +20,7 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationFrameRef = useRef<number>();
+  const loadingTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
   
   // Features data with more reliable video URLs and good fallback images
   const features = [
@@ -27,9 +28,8 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       id: 'face-detection',
       name: 'Face Detection',
       icon: Camera,
-      // Using Pexels videos which are free and reliable
-      videoUrl: 'https://player.vimeo.com/external/308040879.sd.mp4?s=2d4b3a3e78244428b24d5d63c64af8eec2b8b976&profile_id=164&oauth2_token_id=57447761',
-      backupVideoUrl: 'https://player.vimeo.com/external/394068052.sd.mp4?s=78c1e56fcc2c85c7fa84d28ca53cb768e58271d9&profile_id=164&oauth2_token_id=57447761',
+      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-talking-on-the-phone-4990-large.mp4',
+      backupVideoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-woman-posing-for-the-camera-1434-large.mp4',
       fallbackImage: 'https://images.pexels.com/photos/1124589/pexels-photo-1124589.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1',
       description: 'Detect and track faces in real-time with precision'
     },
@@ -37,8 +37,8 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       id: 'facial-landmarks',
       name: 'Facial Landmarks',
       icon: Scan,
-      videoUrl: 'https://player.vimeo.com/external/403293698.sd.mp4?s=f45e69d5f2f22ee0fa4e58ad114e271768b76c65&profile_id=164&oauth2_token_id=57447761',
-      backupVideoUrl: 'https://player.vimeo.com/external/494561169.sd.mp4?s=ec7c79e185bccfc4d1eff6c6ad8ff1b9c0542f12&profile_id=164&oauth2_token_id=57447761',
+      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-talking-by-a-dark-wall-1434-large.mp4',
+      backupVideoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-girl-talking-on-a-new-years-party-1538-large.mp4',
       fallbackImage: 'https://images.pexels.com/photos/2726111/pexels-photo-2726111.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1',
       description: 'Track 468 facial points for advanced effects'
     },
@@ -46,8 +46,8 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       id: 'background-removal',
       name: 'Background Removal',
       icon: Trash2,
-      videoUrl: 'https://player.vimeo.com/external/426921994.sd.mp4?s=7e36b3c34bef1ff1503f2b82968129a3fed14e25&profile_id=164&oauth2_token_id=57447761',
-      backupVideoUrl: 'https://player.vimeo.com/external/517090081.sd.mp4?s=ce0c926acf5cdb2a87a656487aadcb8c72d72d9a&profile_id=164&oauth2_token_id=57447761',
+      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-walking-in-the-street-with-a-jacket-45665-large.mp4',
+      backupVideoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-curly-woman-doing-gestures-on-white-background-40035-large.mp4',
       fallbackImage: 'https://images.pexels.com/photos/1382731/pexels-photo-1382731.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1',
       description: 'Remove background without a green screen'
     },
@@ -55,8 +55,8 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       id: 'background-blur',
       name: 'Background Blur',
       icon: Layers,
-      videoUrl: 'https://player.vimeo.com/external/471907407.sd.mp4?s=d666ff5d1ccc16b0e5e2aed61187012108bbb65d&profile_id=164&oauth2_token_id=57447761',
-      backupVideoUrl: 'https://player.vimeo.com/external/459389137.sd.mp4?s=56e9acd7d462f67b89b1e393ded9d7f9cc728338&profile_id=164&oauth2_token_id=57447761',
+      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-man-dancing-under-changing-lights-32976-large.mp4',
+      backupVideoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-woman-dancing-carelessly-2182-large.mp4',
       fallbackImage: 'https://images.pexels.com/photos/2050994/pexels-photo-2050994.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1',
       description: 'Apply professional blur effect to background'
     },
@@ -64,8 +64,8 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       id: 'beautification',
       name: 'Beautification',
       icon: Sparkles,
-      videoUrl: 'https://player.vimeo.com/external/421147082.sd.mp4?s=d4022aea529d32ad5059e25c57e72173be360bd4&profile_id=164&oauth2_token_id=57447761',
-      backupVideoUrl: 'https://player.vimeo.com/external/552909524.sd.mp4?s=9c63b4a67c42b48a2d38ec909eef41b0a5289cdf&profile_id=164&oauth2_token_id=57447761',
+      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-portrait-of-a-young-model-posing-for-a-shoot-39883-large.mp4',
+      backupVideoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-in-a-photo-shoot-39879-large.mp4',
       fallbackImage: 'https://images.pexels.com/photos/774909/pexels-photo-774909.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1',
       description: 'Enhance appearance with AI-powered filters'
     }
@@ -75,6 +75,11 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
   const currentFeature = features.find(f => f.id === activeFeature) || features[0];
   
   useEffect(() => {
+    // Clear any existing timeout
+    if (loadingTimeoutRef.current) {
+      clearTimeout(loadingTimeoutRef.current);
+    }
+    
     if (videoRef.current) {
       // Reset video state
       setVideoLoaded(false);
@@ -86,33 +91,40 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
         videoRef.current.pause();
       }
       
-      // Reset src attribute and load the new video
+      // Reset video element
       videoRef.current.src = '';
       videoRef.current.removeAttribute('src');
+      videoRef.current.load();
       
-      // Initially set the poster image to ensure we always have a fallback
+      // Set the poster image as fallback
       videoRef.current.poster = currentFeature.fallbackImage;
       
-      setTimeout(() => {
+      // Make sure the video is visible
+      videoRef.current.style.display = 'block';
+      
+      // Clean up any overlays
+      cleanupOverlays();
+      
+      // Load the main video with a small delay to ensure clean state
+      loadingTimeoutRef.current = setTimeout(() => {
         if (videoRef.current) {
           try {
             videoRef.current.src = currentFeature.videoUrl;
             videoRef.current.load();
             
-            // Set poster as fallback
-            videoRef.current.poster = currentFeature.fallbackImage;
-            
-            // Make sure the video is visible
-            videoRef.current.style.display = 'block';
-            
-            // Clean up any overlays
-            cleanupOverlays();
+            // Set a timeout to handle cases where the video takes too long to load
+            loadingTimeoutRef.current = setTimeout(() => {
+              if (!videoLoaded && !loadError) {
+                console.warn("Video load timeout - using fallback");
+                handleVideoError();
+              }
+            }, 5000);
           } catch (err) {
             console.error("Failed to set video source:", err);
-            useImageFallback();
+            handleVideoError();
           }
         }
-      }, 100);
+      }, 300);
     }
     
     // Set up canvas
@@ -121,6 +133,10 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
     return () => {
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
+      }
+      
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current);
       }
       
       cleanupOverlays();
@@ -132,12 +148,11 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       if (isPlaying && videoLoaded && !loadError && !backupLoadError) {
         videoRef.current.play().catch((err) => {
           console.error("Error playing video:", err);
-          // If autoplay is blocked, we'll just show the poster/fallback
           useImageFallback();
         });
         animateEffect();
       } else {
-        if (videoRef.current && typeof videoRef.current.pause === 'function') {
+        if (videoRef.current && !videoRef.current.paused) {
           videoRef.current.pause();
         }
         if (animationFrameRef.current) {
@@ -157,10 +172,10 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
     if (videoRef.current) {
       const parent = videoRef.current.parentElement;
       if (parent) {
-        const overlay = parent.querySelector('.fallback-overlay');
-        if (overlay) {
+        const overlays = parent.querySelectorAll('.fallback-overlay');
+        overlays.forEach(overlay => {
           parent.removeChild(overlay);
-        }
+        });
       }
     }
   };
@@ -176,17 +191,23 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
     canvas.height = canvas.clientHeight;
     
     // Ensure canvas matches video size on load
-    video.onloadedmetadata = () => {
+    const updateCanvasSize = () => {
       if (canvas) {
         canvas.width = video.videoWidth || canvas.clientWidth;
         canvas.height = video.videoHeight || canvas.clientHeight;
       }
     };
     
+    video.addEventListener('loadedmetadata', updateCanvasSize);
+    
     // Start animation
     if (isPlaying) {
       animateEffect();
     }
+    
+    return () => {
+      video.removeEventListener('loadedmetadata', updateCanvasSize);
+    };
   };
   
   const animateEffect = () => {
@@ -201,7 +222,7 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
     // First draw video frame or fallback
-    if (videoRef.current && videoRef.current.readyState >= 2) {
+    if (videoRef.current && videoRef.current.readyState >= 2 && !loadError && !backupLoadError) {
       // Video is ready and can be drawn
       ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
       
@@ -241,7 +262,10 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
         
         // Draw loading text or status
         ctx.font = "16px Arial";
-        ctx.fillText(loadError || backupLoadError ? "Using fallback preview" : "Preview loading...", canvas.width / 2, canvas.height / 2 + 15);
+        const statusText = loadError || backupLoadError 
+          ? "Using fallback preview" 
+          : "Preview loading...";
+        ctx.fillText(statusText, canvas.width / 2, canvas.height / 2 + 15);
       }
       
       // Draw simplified feature effect even without video
@@ -467,7 +491,6 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
   
   const drawBackgroundRemovalEffect = (ctx: CanvasRenderingContext2D, intensity: number) => {
     const strength = intensity / 100;
-    // Simulate background removal
     
     // Create a temporary canvas
     const tempCanvas = document.createElement('canvas');
@@ -651,6 +674,10 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
   
   // Handle video loading
   const handleVideoLoad = () => {
+    if (loadingTimeoutRef.current) {
+      clearTimeout(loadingTimeoutRef.current);
+    }
+    
     console.log("Video loaded successfully:", currentFeature.name);
     setVideoLoaded(true);
     setLoadError(false);
@@ -658,6 +685,13 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
     
     // Remove any error overlays that might be present
     cleanupOverlays();
+    
+    // Start playing if isPlaying is true
+    if (isPlaying && videoRef.current) {
+      videoRef.current.play().catch(err => {
+        console.warn("Autoplay prevented:", err);
+      });
+    }
   };
   
   // Function to handle fallback to image
@@ -671,9 +705,7 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
     setBackupLoadError(true);
     
     // Hide the video element
-    if (videoRef.current) {
-      videoRef.current.style.display = 'none';
-    }
+    videoRef.current.style.display = 'none';
     
     // Ensure video element has the right poster image
     videoRef.current.poster = currentFeature.fallbackImage;
@@ -687,22 +719,21 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
         overlay = document.createElement('div');
         overlay.className = 'fallback-overlay absolute inset-0 flex items-center justify-center bg-gray-800/50';
         
-        const Icon = currentFeature.icon;
-        const iconName = Icon.name || 'Icon';
+        const IconComponent = currentFeature.icon;
         
         overlay.innerHTML = `
           <div class="text-center text-white">
             <div class="w-16 h-16 mx-auto mb-4 rounded-full bg-gray-700/50 flex items-center justify-center">
               <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white">
-                ${iconName === 'Camera' ? '<rect x="2" y="2" width="20" height="20" rx="2" ry="2"></rect><circle cx="12" y="12" r="4"></circle>' : 
-                  iconName === 'Scan' ? '<path d="M21 12V7.5a2.5 2.5 0 0 0-2.5-2.5H16"></path><path d="M3 12v4.5a2.5 2.5 0 0 0 2.5 2.5H9"></path><path d="M3 12V7.5A2.5 2.5 0 0 1 5.5 5H9"></path><path d="M21 12v4.5a2.5 2.5 0 0 1-2.5 2.5H16"></path><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line>' : 
-                  iconName === 'Trash2' ? '<polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line>' : 
-                  iconName === 'Layers' ? '<polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline>' : 
-                  '<circle cx="12" cy="12" r="10"></circle><path d="m9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line>'}
+                ${IconComponent === Camera ? '<rect x="2" y="2" width="20" height="20" rx="2" ry="2"></rect><circle cx="12" cy="12" r="4"></circle>' : 
+                  IconComponent === Scan ? '<path d="M21 12V7.5a2.5 2.5 0 0 0-2.5-2.5H16"></path><path d="M3 12v4.5a2.5 2.5 0 0 0 2.5 2.5H9"></path><path d="M3 12V7.5A2.5 2.5 0 0 1 5.5 5H9"></path><path d="M21 12v4.5a2.5 2.5 0 0 1-2.5 2.5H16"></path><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line>' : 
+                  IconComponent === Trash2 ? '<polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line>' : 
+                  IconComponent === Layers ? '<polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline>' : 
+                  '<path d="M12 2L2 7l10 5 10-5-10-5z"></path><path d="M2 17l10 5 10-5"></path><path d="M2 12l10 5 10-5"></path>'}
               </svg>
             </div>
             <p>${currentFeature.name}</p>
-            <p class="text-sm opacity-80">Preview not available</p>
+            <p class="text-sm opacity-80">Using static preview</p>
           </div>
         `;
         parent.appendChild(overlay);
@@ -712,7 +743,11 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
   
   // Handle video error with improved error handling
   const handleVideoError = () => {
-    console.error(`Error loading video for ${currentFeature.name}`);
+    if (loadingTimeoutRef.current) {
+      clearTimeout(loadingTimeoutRef.current);
+    }
+    
+    console.warn(`Error loading video for ${currentFeature.name}`);
     
     // Mark the main video as having an error
     setLoadError(true);
@@ -722,77 +757,57 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
     if (!backupLoadError && currentFeature.backupVideoUrl && videoRef.current) {
       console.log(`Trying backup video URL for ${currentFeature.name}`);
       
-      // Make sure the video is completely stopped before changing source
-      if (videoRef.current) {
+      try {
+        // Make sure the video is completely stopped before changing source
         videoRef.current.pause();
-        videoRef.current.removeAttribute('src'); // Completely unload the previous video
-      }
-      
-      // Set a short timeout to ensure the previous video is unloaded
-      setTimeout(() => {
-        if (videoRef.current) {
-          try {
-            // Try the backup video
-            videoRef.current.src = currentFeature.backupVideoUrl;
-            videoRef.current.load();
-            
-            // Use promise-based approach for backup video handling
-            const playPromise = new Promise<boolean>((resolve) => {
-              if (videoRef.current) {
-                const handleBackupLoad = () => {
-                  console.log("Backup video loaded");
-                  setVideoLoaded(true);
-                  resolve(true);
-                  videoRef.current?.removeEventListener('loadeddata', handleBackupLoad);
-                };
-                
-                videoRef.current.addEventListener('loadeddata', handleBackupLoad);
-                
-                // Set a timeout to handle cases where the event doesn't fire
-                setTimeout(() => {
-                  if (!videoLoaded) {
-                    console.log("Backup video load timeout");
-                    resolve(false);
-                  }
-                }, 5000);
-              } else {
-                resolve(false);
-              }
-            });
-            
-            // Handle backup video playback
-            playPromise.then((loaded) => {
-              if (loaded && videoRef.current && isPlaying) {
-                videoRef.current.play().catch((err) => {
-                  console.error("Failed to play backup video:", err);
+        videoRef.current.src = '';
+        videoRef.current.removeAttribute('src');
+        videoRef.current.load();
+        
+        // Set a short timeout to ensure the previous video is unloaded
+        loadingTimeoutRef.current = setTimeout(() => {
+          if (videoRef.current) {
+            try {
+              // Try the backup video
+              videoRef.current.src = currentFeature.backupVideoUrl;
+              videoRef.current.load();
+              
+              // Set a timeout to detect if backup video is taking too long
+              loadingTimeoutRef.current = setTimeout(() => {
+                if (!videoLoaded && !backupLoadError) {
+                  console.warn("Backup video load timeout");
                   setBackupLoadError(true);
                   useImageFallback();
-                });
-              } else {
-                setBackupLoadError(true);
-                useImageFallback();
-              }
-            });
-            
-            // Handle backup video error with dedicated error listener
-            if (videoRef.current) {
-              videoRef.current.onerror = () => {
-                console.error("Backup video error");
-                setBackupLoadError(true);
-                useImageFallback();
-              };
+                }
+              }, 5000);
+              
+            } catch (err) {
+              console.error("Error setting backup video:", err);
+              setBackupLoadError(true);
+              useImageFallback();
             }
-          } catch (err) {
-            console.error("Error setting backup video:", err);
-            setBackupLoadError(true);
-            useImageFallback();
           }
-        }
-      }, 300);
+        }, 300);
+      } catch (err) {
+        console.error("Error handling backup video:", err);
+        setBackupLoadError(true);
+        useImageFallback();
+      }
     } else {
       // Both main and backup videos failed or backup doesn't exist
       setBackupLoadError(true);
       useImageFallback();
+    }
+  };
+
+  // Handle backup video error separately
+  const handleBackupError = () => {
+    console.warn("Backup video error");
+    setBackupLoadError(true);
+    useImageFallback();
+    
+    if (loadingTimeoutRef.current) {
+      clearTimeout(loadingTimeoutRef.current);
     }
   };
 
@@ -888,20 +903,19 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
             <video 
               ref={videoRef}
               className="absolute inset-0 w-full h-full object-cover"
-              autoPlay={false}  // We'll control playback manually
               loop
               muted
               poster={currentFeature.fallbackImage}
               onError={handleVideoError}
               onLoadedData={handleVideoLoad}
-            ></video>
+            />
             
             <canvas 
               ref={canvasRef}
               className="absolute inset-0 w-full h-full pointer-events-none"
-            ></canvas>
+            />
             
-            <div className="absolute bottom-4 left-4 bg-black/50 px-3 py-1 rounded-full text-white text-sm flex items-center space-x-2">
+            <div className="absolute bottom-4 left-4 bg-black/50 px-3 py-1.5 rounded-full text-white text-sm flex items-center space-x-2">
               <currentFeature.icon className="w-4 h-4" />
               <span>{currentFeature.name}</span>
             </div>
@@ -909,12 +923,6 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
             {(loadError && !backupLoadError) && (
               <div className="absolute right-4 bottom-4 bg-yellow-500/60 text-white text-xs py-1 px-2 rounded">
                 Using backup video
-              </div>
-            )}
-            
-            {backupLoadError && (
-              <div className="absolute right-4 bottom-4 bg-black/60 text-white text-xs py-1 px-2 rounded">
-                Using fallback preview
               </div>
             )}
           </div>
