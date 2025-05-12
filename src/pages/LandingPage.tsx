@@ -11,6 +11,8 @@ import AIFeatureShowcase from '../components/landing/AIFeatureShowcase';
 import Footer from '../components/landing/Footer';
 import FeatureHighlight from '../components/landing/FeatureHighlight';
 import Testimonials from '../components/landing/Testimonials';
+import FloatingIcons from '../components/landing/FloatingIcons';
+import FeaturesList from '../components/landing/FeaturesList';
 
 const LandingPage = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -156,6 +158,9 @@ const LandingPage = () => {
         className="relative overflow-hidden bg-gradient-to-r from-gray-900 to-black py-24 sm:py-32"
         style={{ scale: heroScale }}
       >
+        {/* Floating Icons animation */}
+        <FloatingIcons />
+        
         {/* Animated background elements */}
         <motion.div className="absolute inset-0 overflow-hidden">
           <motion.div 
@@ -206,35 +211,6 @@ const LandingPage = () => {
               </motion.a>
             </div>
           </div>
-          
-          {/* Floating elements animation */}
-          <motion.div
-            className="absolute -right-20 top-40 w-40 h-40 rounded-full bg-blue-500/20 blur-3xl"
-            animate={{ 
-              x: [0, 30, 0], 
-              y: [0, 15, 0],
-              scale: [1, 1.1, 1]
-            }}
-            transition={{ 
-              repeat: Infinity, 
-              duration: 15, 
-              ease: "easeInOut" 
-            }}
-          />
-          
-          <motion.div
-            className="absolute -left-20 bottom-20 w-40 h-40 rounded-full bg-purple-500/20 blur-3xl"
-            animate={{ 
-              x: [0, -30, 0], 
-              y: [0, -20, 0],
-              scale: [1, 1.2, 1]
-            }}
-            transition={{ 
-              repeat: Infinity, 
-              duration: 20, 
-              ease: "easeInOut" 
-            }}
-          />
           
           {/* Demo video */}
           <div className="mt-16 relative max-w-4xl mx-auto">
@@ -395,6 +371,9 @@ const LandingPage = () => {
           </motion.div>
         </div>
       </div>
+      
+      {/* Comprehensive Feature List */}
+      <FeaturesList />
       
       {/* AI Features Showcase */}
       <AIFeatureShowcase />
