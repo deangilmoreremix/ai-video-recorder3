@@ -25,8 +25,8 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       id: 'face-detection',
       name: 'Face Detection',
       icon: Camera,
-      // Updated to a more reliable source
-      videoUrl: 'https://player.vimeo.com/external/394678700.sd.mp4?s=353646e34d7bde02456e7695c4171aeec63af891&profile_id=165&oauth2_token_id=57447761',
+      // Updated to a new reliable source
+      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-working-on-laptop-in-office-space-42905-large.mp4',
       fallbackImage: 'https://images.unsplash.com/photo-1590031905407-86afa9c32411?auto=format&fit=crop&w=800&q=80',
       description: 'Detect and track faces in real-time with precision'
     },
