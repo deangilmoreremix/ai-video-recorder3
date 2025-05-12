@@ -109,8 +109,7 @@ const AIFeatureShowcase: React.FC = () => {
                   <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent">
                     <div className="absolute bottom-4 left-4">
                       <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-[#E44E51]">
-                        {activeFeatureData && activeFeatureData.icon && 
-                          <activeFeatureData.icon className="w-4 h-4 mr-1" />}
+                        {activeFeatureData && React.createElement(activeFeatureData.icon, { className: "w-4 h-4 mr-1" })}
                         {activeFeatureData?.title}
                       </span>
                       <div className="mt-2 text-xs text-white/80">AI processing applied in real-time</div>
