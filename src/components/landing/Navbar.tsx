@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Menu, X, ChevronDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -8,6 +8,8 @@ const Navbar = () => {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isSubmenuOpen, setIsSubmenuOpen] = useState(false);
   const location = useLocation();
+  const submenuRef = useRef<HTMLDivElement>(null);
+  const submenuButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -41,6 +43,26 @@ const Navbar = () => {
     setIsMenuOpen(false);
   }, [location]);
 
+  // Handle click outside to close submenu
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        isSubmenuOpen &&
+        submenuRef.current &&
+        !submenuRef.current.contains(event.target as Node) &&
+        submenuButtonRef.current &&
+        !submenuButtonRef.current.contains(event.target as Node)
+      ) {
+        setIsSubmenuOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isSubmenuOpen]);
+
   return (
     <header className={`sticky top-0 z-50 ${isScrolled ? 'bg-white shadow-md' : 'bg-transparent'} transition-all duration-300`}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -64,6 +86,7 @@ const Navbar = () => {
               
               <div className="relative group">
                 <button
+                  ref={submenuButtonRef}
                   onClick={() => setIsSubmenuOpen(!isSubmenuOpen)}
                   onMouseEnter={() => setIsSubmenuOpen(true)}
                   className={`text-${isScrolled ? 'gray-900' : 'white'} hover:text-[#E44E51] px-3 py-2 text-sm font-medium flex items-center transition-colors duration-200`}
@@ -72,29 +95,32 @@ const Navbar = () => {
                   <ChevronDown className={`ml-1 w-4 h-4 transition-transform duration-200 ${isSubmenuOpen ? 'rotate-180' : ''}`} />
                 </button>
                 
-                <div
-                  className={`absolute left-0 mt-1 w-56 rounded-md shadow-lg ${isScrolled ? 'bg-white' : 'bg-white'} ring-1 ring-black ring-opacity-5 focus:outline-none z-50 ${isSubmenuOpen ? 'block' : 'hidden'}`}
-                  onMouseEnter={() => setIsSubmenuOpen(true)}
-                  onMouseLeave={() => setIsSubmenuOpen(false)}
-                >
-                  <div className="py-1">
-                    <Link to="/features/ai" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                      AI Features
-                    </Link>
-                    <Link to="/features/recorder" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                      Video Recorder
-                    </Link>
-                    <Link to="/features/editor" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                      Video Editor
-                    </Link>
-                    <Link to="/features/export" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                      Export Options
-                    </Link>
-                    <Link to="/features/animation" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                      GIFs & Thumbnails
-                    </Link>
+                {isSubmenuOpen && (
+                  <div
+                    ref={submenuRef}
+                    onMouseEnter={() => setIsSubmenuOpen(true)}
+                    onMouseLeave={() => setIsSubmenuOpen(false)}
+                    className="absolute left-0 mt-1 w-56 bg-white rounded-md shadow-lg ring-1 ring-black ring-opacity-5 z-50"
+                  >
+                    <div className="py-1">
+                      <Link to="/features/ai" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                        AI Features
+                      </Link>
+                      <Link to="/features/recorder" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                        Video Recorder
+                      </Link>
+                      <Link to="/features/editor" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                        Video Editor
+                      </Link>
+                      <Link to="/features/export" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                        Export Options
+                      </Link>
+                      <Link to="/features/animation" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                        GIFs & Thumbnails
+                      </Link>
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
               
               <a
