@@ -6,12 +6,14 @@ import { FeatureList } from '../components/Features/FeatureList';
 import { AdvancedControls } from '../components/Controls/AdvancedControls';
 import { WalkthroughTutorial } from '../components/Tutorial/WalkthroughTutorial';
 import { FeatureAssistant } from '../components/Assistant/FeatureAssistant';
-import { HelpCircle, Video } from 'lucide-react';
+import { HelpCircle, Video, Grid } from 'lucide-react';
+import RecordingsLibrary from '../components/Recordings/RecordingsLibrary';
 import '../index.css';
 
 function AppMain() {
   const [showTutorial, setShowTutorial] = useState(true);
   const [hasSeenTutorial, setHasSeenTutorial] = useState(false);
+  const [showRecordings, setShowRecordings] = useState(false);
 
   useEffect(() => {
     const seen = localStorage.getItem('hasSeenTutorial');
@@ -37,10 +39,22 @@ function AppMain() {
             AI Screen Recorder
           </Link>
           <div className="flex items-center space-x-4">
-            <Link to="/recordings" className="flex items-center text-gray-700 hover:text-[#E44E51]">
-              <Video className="w-5 h-5 mr-1" />
-              <span>My Recordings</span>
-            </Link>
+            <button 
+              onClick={() => setShowRecordings(!showRecordings)} 
+              className={`flex items-center text-gray-700 hover:text-[#E44E51] ${showRecordings ? 'text-[#E44E51]' : ''}`}
+            >
+              {showRecordings ? (
+                <>
+                  <Grid className="w-5 h-5 mr-1" />
+                  <span>Back to Recorder</span>
+                </>
+              ) : (
+                <>
+                  <Video className="w-5 h-5 mr-1" />
+                  <span>My Recordings</span>
+                </>
+              )}
+            </button>
             <button
               onClick={() => setShowTutorial(true)}
               className="p-2 hover:bg-gray-100 rounded-full transition-colors"
@@ -52,17 +66,29 @@ function AppMain() {
       </header>
       
       <main className="max-w-7xl mx-auto px-4 py-6">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 space-y-6">
-            <VideoRecorder />
-            <FeatureList />
+        {showRecordings ? (
+          <RecordingsLibrary 
+            onBackToRecorder={() => setShowRecordings(false)}
+            onEditRecording={(recordingId) => {
+              // Handle editing a recording
+              console.log(`Editing recording: ${recordingId}`);
+              setShowRecordings(false);
+              // Additional logic to load the recording for editing
+            }}
+          />
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2 space-y-6">
+              <VideoRecorder />
+              <FeatureList />
+            </div>
+            
+            <div className="space-y-6">
+              <VideoPlayback />
+              <AdvancedControls />
+            </div>
           </div>
-          
-          <div className="space-y-6">
-            <VideoPlayback />
-            <AdvancedControls />
-          </div>
-        </div>
+        )}
       </main>
 
       <WalkthroughTutorial
