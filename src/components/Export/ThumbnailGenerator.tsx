@@ -4,37 +4,23 @@ import {
   Wand2, Sliders, Layers, Copy, Trash2, Type,
   RefreshCw, Check, ArrowRight, Image, Sparkles
 } from 'lucide-react';
-import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile } from '@ffmpeg/util';
 
 interface ThumbnailGeneratorProps {
   videoBlob: Blob | null;
   onGenerate?: (thumbnails: Blob[]) => void;
 }
 
-interface ThumbnailSettings {
-  count: number;
-  format: 'jpg' | 'png' | 'webp';
-  quality: number;
-  cropEnabled: boolean;
-  colorCorrection: boolean;
-  aspectRatio: '16:9' | '9:16' | '1:1' | '4:3';
-  textOverlay: boolean;
-  textContent: string;
-  autoDetect: boolean;
-}
-
 export const ThumbnailGenerator: React.FC<ThumbnailGeneratorProps> = ({
   videoBlob,
   onGenerate
 }) => {
-  const [settings, setSettings] = useState<ThumbnailSettings>({
+  const [settings, setSettings] = useState({
     count: 3,
-    format: 'jpg',
+    format: 'jpg' as 'jpg' | 'png' | 'webp',
     quality: 90,
     cropEnabled: false,
     colorCorrection: true,
-    aspectRatio: '16:9',
+    aspectRatio: '16:9' as '16:9' | '9:16' | '1:1' | '4:3',
     textOverlay: false,
     textContent: '',
     autoDetect: true
@@ -60,60 +46,105 @@ export const ThumbnailGenerator: React.FC<ThumbnailGeneratorProps> = ({
   }, [videoBlob]);
   
   const generateThumbnails = async () => {
-    if (!videoBlob || !videoRef.current) return;
+    if (!videoBlob || !videoRef.current || !canvasRef.current) return;
     
     setIsProcessing(true);
     setProgress(0);
     
     try {
-      const ffmpeg = new FFmpeg();
-      await ffmpeg.load();
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext('2d');
       
-      // Write input file
-      await ffmpeg.writeFile('input.webm', await fetchFile(videoBlob));
+      if (!ctx) throw new Error("Could not get canvas context");
       
-      const duration = videoRef.current.duration;
-      const results = [];
+      // Set canvas size to match video or aspect ratio
+      const aspectRatioMultiplier = 
+        settings.aspectRatio === '16:9' ? { w: 16, h: 9 } :
+        settings.aspectRatio === '9:16' ? { w: 9, h: 16 } :
+        settings.aspectRatio === '1:1' ? { w: 1, h: 1 } :
+        { w: 4, h: 3 };
       
+      if (settings.cropEnabled) {
+        // Use custom aspect ratio
+        const height = Math.round((video.videoWidth / aspectRatioMultiplier.w) * aspectRatioMultiplier.h);
+        canvas.width = video.videoWidth;
+        canvas.height = height;
+      } else {
+        // Match video dimensions
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+      }
+      
+      const duration = video.duration;
+      const results: string[] = [];
+      const blobResults: Blob[] = [];
+      
+      // Generate thumbnails at evenly spaced intervals
       for (let i = 0; i < settings.count; i++) {
-        // Calculate timestamp for this thumbnail
-        const timestamp = (duration / (settings.count + 1)) * (i + 1);
+        // Calculate position (add 0.5 to avoid exact 0)
+        const position = ((i + 0.5) / settings.count) * duration;
         
-        // Build FFmpeg command
-        const outputFilename = `thumbnail_${i}.${settings.format}`;
-        const args = [
-          '-ss', timestamp.toString(),
-          '-i', 'input.webm',
-          '-frames:v', '1'
-        ];
+        // Set video position
+        video.currentTime = position;
         
-        // Add quality settings
-        if (settings.format === 'jpg') {
-          args.push('-q:v', (Math.round((100 - settings.quality) / 5)).toString());
-        } else if (settings.format === 'webp') {
-          args.push('-q:v', settings.quality.toString());
-        }
+        // Wait for the video to seek to the time
+        await new Promise<void>(resolve => {
+          const handleSeeked = () => {
+            video.removeEventListener('seeked', handleSeeked);
+            resolve();
+          };
+          video.addEventListener('seeked', handleSeeked);
+        });
+        
+        // Draw the frame to canvas
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         
         // Apply color correction if enabled
         if (settings.colorCorrection) {
-          args.push('-vf', 'eq=brightness=0.05:contrast=1.1:saturation=1.2');
+          // Simple brightness and contrast adjustment
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const data = imageData.data;
+          
+          // Apply simple enhancement
+          for (let j = 0; j < data.length; j += 4) {
+            // Increase contrast slightly
+            data[j] = Math.min(255, data[j] * 1.1);     // Red
+            data[j + 1] = Math.min(255, data[j + 1] * 1.1); // Green
+            data[j + 2] = Math.min(255, data[j + 2] * 1.1); // Blue
+          }
+          
+          ctx.putImageData(imageData, 0, 0);
         }
         
-        // Add output filename
-        args.push(outputFilename);
+        // Add text overlay if enabled
+        if (settings.textOverlay && settings.textContent) {
+          const text = settings.textContent;
+          ctx.font = 'bold 32px Arial';
+          ctx.fillStyle = 'white';
+          ctx.strokeStyle = 'black';
+          ctx.lineWidth = 2;
+          ctx.textAlign = 'center';
+          ctx.strokeText(text, canvas.width / 2, canvas.height - 40);
+          ctx.fillText(text, canvas.width / 2, canvas.height - 40);
+        }
         
-        // Execute FFmpeg command
-        await ffmpeg.exec(args);
+        // Convert canvas to blob
+        const mimeType = 
+          settings.format === 'jpg' ? 'image/jpeg' :
+          settings.format === 'png' ? 'image/png' : 'image/webp';
         
-        // Read the output file
-        const data = await ffmpeg.readFile(outputFilename);
+        const quality = settings.format === 'jpg' || settings.format === 'webp' 
+          ? settings.quality / 100 
+          : undefined;
         
-        // Create thumbnail URL
-        const blob = new Blob([data], { 
-          type: settings.format === 'jpg' ? 'image/jpeg' : 
-                settings.format === 'png' ? 'image/png' : 'image/webp' 
+        const blob = await new Promise<Blob>(resolve => {
+          canvas.toBlob(blob => resolve(blob!), mimeType, quality);
         });
         
+        blobResults.push(blob);
+        
+        // Create URL for preview
         const url = URL.createObjectURL(blob);
         results.push(url);
         
@@ -122,6 +153,11 @@ export const ThumbnailGenerator: React.FC<ThumbnailGeneratorProps> = ({
       }
       
       setThumbnails(results);
+      
+      // Call the onGenerate callback with the generated thumbnails
+      if (onGenerate) {
+        onGenerate(blobResults);
+      }
     } catch (error) {
       console.error('Error generating thumbnails:', error);
     } finally {
@@ -129,203 +165,203 @@ export const ThumbnailGenerator: React.FC<ThumbnailGeneratorProps> = ({
     }
   };
   
-  const generateAnimatedThumbnail = async () => {
-    if (!videoBlob || !videoRef.current) return;
-    
-    setIsProcessing(true);
-    setProgress(0);
-    
-    try {
-      const ffmpeg = new FFmpeg();
-      await ffmpeg.load();
-      
-      // Write input file
-      await ffmpeg.writeFile('input.webm', await fetchFile(videoBlob));
-      
-      // Select a point in the video for the animated thumbnail
-      const duration = videoRef.current.duration;
-      const startTime = duration / 3; // Pick a point around 1/3 through
-      
-      // Create a short GIF
-      const args = [
-        '-ss', startTime.toString(),
-        '-t', '3',  // 3 seconds duration
-        '-i', 'input.webm',
-        '-vf', 'fps=10,scale=480:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse=dither=sierra2_4a',
-        'output.gif'
-      ];
-      
-      await ffmpeg.exec(args);
-      
-      // Read the output file
-      const data = await ffmpeg.readFile('output.gif');
-      
-      // Create thumbnail URL
-      const blob = new Blob([data], { type: 'image/gif' });
-      const url = URL.createObjectURL(blob);
-      
-      setThumbnails([url]);
-    } catch (error) {
-      console.error('Error generating animated thumbnail:', error);
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-  
   return (
-    <div className="bg-white rounded-lg shadow-lg p-4">
-      <h3 className="text-lg font-semibold mb-4">Thumbnail Generator</h3>
-      
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-        <div className="aspect-video bg-gray-100 rounded-lg overflow-hidden relative">
-          <video
-            ref={videoRef}
-            className="w-full h-full"
-            controls
-          />
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="md:col-span-1">
+          {/* Video Preview */}
+          <div className="aspect-video bg-gray-900 rounded-lg overflow-hidden relative shadow-md">
+            <video
+              ref={videoRef}
+              className="w-full h-full"
+              controls
+            />
+          </div>
+          
+          {/* Hidden canvas for processing */}
           <canvas
             ref={canvasRef}
-            className="absolute inset-0 pointer-events-none"
+            className="hidden"
           />
+          
+          {/* Processing Button */}
+          <button
+            onClick={generateThumbnails}
+            disabled={isProcessing || !videoBlob}
+            className="mt-4 w-full flex items-center justify-center px-4 py-2 bg-[#E44E51] text-white rounded-lg hover:bg-[#D43B3E] disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
+          >
+            {isProcessing ? (
+              <div className="flex items-center space-x-2">
+                <RefreshCw className="w-5 h-5 animate-spin" />
+                <span>Processing... {progress}%</span>
+              </div>
+            ) : (
+              <div className="flex items-center space-x-2">
+                <Camera className="w-5 h-5" />
+                <span>Generate Thumbnails</span>
+              </div>
+            )}
+          </button>
         </div>
         
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-gray-700">
-                Number of Thumbnails
-              </label>
-              <div className="flex items-center">
+        <div className="md:col-span-2">
+          <div className="p-4 bg-gray-50 rounded-lg space-y-6 shadow-sm">
+            <h3 className="text-lg font-medium">Thumbnail Generator</h3>
+            <p className="text-sm text-gray-600">Create high-quality thumbnails from your video with customizable settings.</p>
+            
+            {/* Settings Grid */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700">
+                  Number of Thumbnails
+                </label>
+                <div className="flex items-center">
+                  <input
+                    type="range"
+                    min="1"
+                    max="9"
+                    value={settings.count}
+                    onChange={(e) => setSettings({
+                      ...settings,
+                      count: Number(e.target.value)
+                    })}
+                    className="flex-1 accent-[#E44E51] mr-2"
+                  />
+                  <span className="text-sm font-medium w-6 text-center">
+                    {settings.count}
+                  </span>
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700">Format</label>
+                <div className="grid grid-cols-3 gap-1">
+                  {['jpg', 'png', 'webp'].map(format => (
+                    <button
+                      key={format}
+                      onClick={() => setSettings({
+                        ...settings,
+                        format: format as any
+                      })}
+                      className={`py-1 rounded-lg text-xs ${
+                        settings.format === format
+                          ? 'bg-[#E44E51] text-white'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {format.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            
+            {/* Feature toggles */}
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => setSettings({
+                  ...settings,
+                  colorCorrection: !settings.colorCorrection
+                })}
+                className={`px-3 py-1.5 rounded-lg text-sm flex items-center space-x-1 ${
+                  settings.colorCorrection
+                    ? 'bg-[#E44E51]/10 text-[#E44E51]'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                <Palette className="w-4 h-4" />
+                <span>Auto Color</span>
+              </button>
+              
+              <button
+                onClick={() => setSettings({
+                  ...settings,
+                  cropEnabled: !settings.cropEnabled
+                })}
+                className={`px-3 py-1.5 rounded-lg text-sm flex items-center space-x-1 ${
+                  settings.cropEnabled
+                    ? 'bg-[#E44E51]/10 text-[#E44E51]'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                <Crop className="w-4 h-4" />
+                <span>Smart Crop</span>
+              </button>
+              
+              <button
+                onClick={() => setSettings({
+                  ...settings,
+                  textOverlay: !settings.textOverlay
+                })}
+                className={`px-3 py-1.5 rounded-lg text-sm flex items-center space-x-1 ${
+                  settings.textOverlay
+                    ? 'bg-[#E44E51]/10 text-[#E44E51]'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                <Type className="w-4 h-4" />
+                <span>Text Overlay</span>
+              </button>
+            </div>
+            
+            {/* Additional settings that appear based on toggles */}
+            {settings.textOverlay && (
+              <div className="p-3 bg-white rounded-lg">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Overlay Text
+                </label>
                 <input
-                  type="range"
-                  min="1"
-                  max="9"
-                  value={settings.count}
+                  type="text"
+                  value={settings.textContent}
                   onChange={(e) => setSettings({
                     ...settings,
-                    count: Number(e.target.value)
+                    textContent: e.target.value
                   })}
-                  className="flex-1 accent-[#E44E51] mr-2"
+                  placeholder="Enter text to overlay"
+                  className="w-full rounded-lg border-gray-300"
                 />
-                <span className="text-sm font-medium w-6 text-center">
-                  {settings.count}
-                </span>
               </div>
-            </div>
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-gray-700">Format</label>
-              <div className="grid grid-cols-3 gap-1">
-                {['jpg', 'png', 'webp'].map(format => (
-                  <button
-                    key={format}
-                    onClick={() => setSettings({
-                      ...settings,
-                      format: format as any
-                    })}
-                    className={`py-1 rounded-lg text-xs ${
-                      settings.format === format
-                        ? 'bg-[#E44E51] text-white'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    {format.toUpperCase()}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-          
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => setSettings({
-                ...settings,
-                colorCorrection: !settings.colorCorrection
-              })}
-              className={`px-3 py-1.5 rounded-lg text-sm flex items-center space-x-1 ${
-                settings.colorCorrection
-                  ? 'bg-[#E44E51]/10 text-[#E44E51]'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}
-            >
-              <Palette className="w-4 h-4" />
-              <span>Auto Color</span>
-            </button>
-            <button
-              onClick={() => setSettings({
-                ...settings,
-                cropEnabled: !settings.cropEnabled
-              })}
-              className={`px-3 py-1.5 rounded-lg text-sm flex items-center space-x-1 ${
-                settings.cropEnabled
-                  ? 'bg-[#E44E51]/10 text-[#E44E51]'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}
-            >
-              <Crop className="w-4 h-4" />
-              <span>Smart Crop</span>
-            </button>
-            <button
-              onClick={() => setSettings({
-                ...settings,
-                textOverlay: !settings.textOverlay
-              })}
-              className={`px-3 py-1.5 rounded-lg text-sm flex items-center space-x-1 ${
-                settings.textOverlay
-                  ? 'bg-[#E44E51]/10 text-[#E44E51]'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}
-            >
-              <Type className="w-4 h-4" />
-              <span>Text Overlay</span>
-            </button>
-            <button
-              onClick={() => setSettings({
-                ...settings,
-                autoDetect: !settings.autoDetect
-              })}
-              className={`px-3 py-1.5 rounded-lg text-sm flex items-center space-x-1 ${
-                settings.autoDetect
-                  ? 'bg-[#E44E51]/10 text-[#E44E51]'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}
-            >
-              <Sparkles className="w-4 h-4" />
-              <span>Smart Detection</span>
-            </button>
-          </div>
-          
-          <div className="grid grid-cols-2 gap-3">
-            <button
-              onClick={generateThumbnails}
-              disabled={isProcessing}
-              className="px-4 py-2 bg-[#E44E51] text-white rounded-lg hover:bg-[#D43B3E] 
-                disabled:opacity-50 flex items-center justify-center space-x-2"
-            >
-              {isProcessing ? (
-                <RefreshCw className="w-4 h-4 animate-spin" />
-              ) : (
-                <Camera className="w-4 h-4" />
-              )}
-              <span>Generate Thumbnails</span>
-            </button>
+            )}
             
-            <button
-              onClick={generateAnimatedThumbnail}
-              disabled={isProcessing}
-              className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-900 
-                disabled:opacity-50 flex items-center justify-center space-x-2"
-            >
-              <Play className="w-4 h-4" />
-              <span>Create Animated</span>
-            </button>
+            {settings.cropEnabled && (
+              <div className="p-3 bg-white rounded-lg">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Aspect Ratio
+                </label>
+                <div className="grid grid-cols-4 gap-2">
+                  {[
+                    { id: '16:9', label: 'Landscape 16:9' },
+                    { id: '9:16', label: 'Portrait 9:16' },
+                    { id: '1:1', label: 'Square 1:1' },
+                    { id: '4:3', label: 'Standard 4:3' }
+                  ].map(ratio => (
+                    <button
+                      key={ratio.id}
+                      onClick={() => setSettings({
+                        ...settings,
+                        aspectRatio: ratio.id as any
+                      })}
+                      className={`py-2 text-sm rounded-lg ${
+                        settings.aspectRatio === ratio.id
+                          ? 'bg-[#E44E51]/10 text-[#E44E51]'
+                          : 'bg-gray-50 hover:bg-gray-100'
+                      }`}
+                    >
+                      {ratio.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
       
+      {/* Generated Thumbnails */}
       {thumbnails.length > 0 && (
-        <div className="space-y-3">
-          <h4 className="font-medium">Generated Thumbnails</h4>
-          <div className="grid grid-cols-3 md:grid-cols-5 gap-3">
+        <div className="space-y-4">
+          <h3 className="text-lg font-medium">Generated Thumbnails</h3>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
             {thumbnails.map((url, index) => (
               <div
                 key={index}
@@ -340,20 +376,20 @@ export const ThumbnailGenerator: React.FC<ThumbnailGeneratorProps> = ({
                   className="w-full h-full object-cover"
                 />
                 <div className="absolute inset-0 bg-black opacity-0 group-hover:opacity-30 transition-opacity"></div>
-                <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
                   <a 
                     href={url} 
                     download={`thumbnail-${index + 1}.${settings.format}`}
-                    className="p-1 bg-white rounded"
+                    className="p-1.5 bg-white rounded-full text-gray-700 hover:text-gray-900 shadow-md"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <Download className="w-4 h-4 text-gray-700" />
+                    <Download className="w-4 h-4" />
                   </a>
                 </div>
                 
                 {selectedIndex === index && (
-                  <div className="absolute bottom-1 right-1 p-1 bg-[#E44E51] rounded-full">
-                    <Check className="w-3 h-3 text-white" />
+                  <div className="absolute bottom-2 right-2 p-1 bg-[#E44E51] rounded-full">
+                    <Check className="w-4 h-4 text-white" />
                   </div>
                 )}
               </div>
@@ -361,12 +397,16 @@ export const ThumbnailGenerator: React.FC<ThumbnailGeneratorProps> = ({
           </div>
           
           {selectedIndex !== null && (
-            <div className="flex justify-end space-x-2 mt-2">
-              <button className="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 text-sm flex items-center space-x-1">
+            <div className="flex justify-end space-x-2">
+              <button 
+                className="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 text-sm flex items-center space-x-1"
+              >
                 <Copy className="w-4 h-4" />
                 <span>Copy</span>
               </button>
-              <button className="px-3 py-1.5 bg-[#E44E51] text-white rounded-lg hover:bg-[#D43B3E] text-sm flex items-center space-x-1">
+              <button 
+                className="px-3 py-1.5 bg-[#E44E51] text-white rounded-lg hover:bg-[#D43B3E] shadow-sm text-sm flex items-center space-x-1"
+              >
                 <ArrowRight className="w-4 h-4" />
                 <span>Use Selected</span>
               </button>
