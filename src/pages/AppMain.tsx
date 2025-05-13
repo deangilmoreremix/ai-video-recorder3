@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { VideoRecorder } from '../components/Recorder/VideoRecorder';
 import { VideoPlayback } from '../components/Preview/VideoPlayback';
 import { FeatureList } from '../components/Features/FeatureList';
 import { AdvancedControls } from '../components/Controls/AdvancedControls';
 import { WalkthroughTutorial } from '../components/Tutorial/WalkthroughTutorial';
 import { FeatureAssistant } from '../components/Assistant/FeatureAssistant';
-import { HelpCircle } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { HelpCircle, Video } from 'lucide-react';
 import '../index.css';
 
 function AppMain() {
@@ -36,12 +36,18 @@ function AppMain() {
           <Link to="/" className="typing-animation font-bold text-3xl text-transparent bg-clip-text bg-gradient-to-r from-[#E44E51] to-[#D43B3E] text-center">
             AI Screen Recorder
           </Link>
-          <button
-            onClick={() => setShowTutorial(true)}
-            className="p-2 hover:bg-gray-100 rounded-full transition-colors"
-          >
-            <HelpCircle className="w-6 h-6 text-[#E44E51]" />
-          </button>
+          <div className="flex items-center space-x-4">
+            <Link to="/recordings" className="flex items-center text-gray-700 hover:text-[#E44E51]">
+              <Video className="w-5 h-5 mr-1" />
+              <span>My Recordings</span>
+            </Link>
+            <button
+              onClick={() => setShowTutorial(true)}
+              className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+            >
+              <HelpCircle className="w-6 h-6 text-[#E44E51]" />
+            </button>
+          </div>
         </div>
       </header>
       

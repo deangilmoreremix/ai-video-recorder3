@@ -3,8 +3,10 @@ import {
   Video, Upload, Volume2, VolumeX, Maximize2, Minimize2,
   Play, Pause, Square, Brain, Camera, Monitor, Layout,
   Settings, HelpCircle, Download, Save, Mic, MicOff,
-  ChevronDown, Sliders, RefreshCw, Eye, X
+  ChevronDown, Sliders, RefreshCw, Eye, X, Video as VideoIcon,
+  List
 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useAIFeatures } from '../../hooks/useAIFeatures';
 import { AIFeatureGrid } from '../AI/AIFeatureGrid';
 import { AIVideoFeatures } from '../AI/AIVideoFeatures';
@@ -61,7 +63,6 @@ export const VideoRecorder: React.FC = () => {
 
   // AI Features
   const { features, toggleFeature, loadModels, isModelsLoaded, processFrame } = useAIFeatures();
-  const [processingCanvas, setProcessingCanvas] = useState<HTMLCanvasElement | null>(null);
 
   // Format recording time
   const formatTime = (seconds: number) => {
@@ -75,14 +76,6 @@ export const VideoRecorder: React.FC = () => {
     loadModels().catch(err => {
       console.error("Failed to load AI models:", err);
     });
-    
-    // Create canvas for processing
-    const canvas = document.createElement('canvas');
-    setProcessingCanvas(canvas);
-    
-    return () => {
-      setProcessingCanvas(null);
-    };
   }, [loadModels]);
 
   // Get available audio devices
@@ -176,34 +169,29 @@ export const VideoRecorder: React.FC = () => {
     let animationFrame: number;
     
     const processCameraPreview = async () => {
-      if (isRecording || !videoRef.current || !processingCanvas || !isModelsLoaded) {
+      if (isRecording || !videoRef.current || !isModelsLoaded) {
         animationFrame = requestAnimationFrame(processCameraPreview);
         return;
       }
       
       if (videoRef.current.readyState >= 2) {
         try {
-          // Ensure canvas dimensions match video
-          if (processingCanvas.width !== videoRef.current.videoWidth ||
-              processingCanvas.height !== videoRef.current.videoHeight) {
-            processingCanvas.width = videoRef.current.videoWidth;
-            processingCanvas.height = videoRef.current.videoHeight;
-          }
+          // Create a temporary canvas for processing if needed
+          const tempCanvas = document.createElement('canvas');
+          tempCanvas.width = videoRef.current.videoWidth;
+          tempCanvas.height = videoRef.current.videoHeight;
           
           // Process the frame
-          await processFrame(videoRef.current, processingCanvas);
+          await processFrame(videoRef.current, tempCanvas);
           
           // Draw the processed frame to the video element if any feature is enabled
           const hasEnabledFeatures = Object.values(features).some(f => f.enabled);
           
           if (hasEnabledFeatures) {
             // Create a temporary video stream from the canvas
-            const stream = processingCanvas.captureStream();
+            const stream = tempCanvas.captureStream();
             
             // Apply the stream directly to the video element
-            // This is a simplified approach - in a real implementation 
-            // you would maintain the original stream and only replace 
-            // what's being displayed
             if (videoRef.current.srcObject !== stream && !isRecording) {
               // Store the original stream for recording
               if (!streamRef.current) {
@@ -241,25 +229,17 @@ export const VideoRecorder: React.FC = () => {
     
     try {
       let stream: MediaStream;
-      
-      // For audio constraints
       const audioConstraints = {
         deviceId: selectedMicId ? { exact: selectedMicId } : undefined,
         echoCancellation: true,
         noiseSuppression: true,
-        autoGainControl: true,
-        volume: micVolume,
-        muted: isMicMuted
+        autoGainControl: true
       };
 
-      // For video constraints
       const videoConstraints = selectedCameraId 
         ? { deviceId: { exact: selectedCameraId } }
         : true;
 
-      // Determine if we need to use the AI processed stream
-      const useAIProcessing = Object.values(features).some(f => f.enabled);
-      
       switch (recordingMode) {
         case 'screen':
           const screenStream = await navigator.mediaDevices.getDisplayMedia({ 
@@ -323,12 +303,27 @@ export const VideoRecorder: React.FC = () => {
           break;
           
         default: // webcam
-          if (useAIProcessing && processingCanvas && isModelsLoaded) {
+          // Determine if we need to use the AI processed stream
+          const useAIProcessing = Object.values(features).some(f => f.enabled);
+          
+          if (useAIProcessing && isModelsLoaded) {
+            // Create a canvas for AI processing
+            const processingCanvas = document.createElement('canvas');
+            
             // Get the regular webcam stream for audio
             const regularStream = await navigator.mediaDevices.getUserMedia({ 
               video: videoConstraints,
               audio: audioConstraints
             });
+            
+            // Set canvas dimensions
+            if (videoRef.current) {
+              processingCanvas.width = videoRef.current.videoWidth;
+              processingCanvas.height = videoRef.current.videoHeight;
+            } else {
+              processingCanvas.width = 1280;
+              processingCanvas.height = 720;
+            }
             
             // Create a stream from the processing canvas
             const canvasStream = processingCanvas.captureStream(30); // 30 FPS
@@ -344,6 +339,16 @@ export const VideoRecorder: React.FC = () => {
             
             // Store regular stream for preview
             streamRef.current = regularStream;
+            
+            // Set up a processing loop to apply AI effects to each frame
+            const processFrames = async () => {
+              if (!videoRef.current) return;
+              
+              await processFrame(videoRef.current, processingCanvas);
+              requestAnimationFrame(processFrames);
+            };
+            
+            processFrames();
           } else {
             // Standard webcam recording without AI
             stream = await navigator.mediaDevices.getUserMedia({ 
@@ -513,7 +518,12 @@ export const VideoRecorder: React.FC = () => {
     <div className="bg-white rounded-lg shadow-lg p-4">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-lg font-semibold">Video Recorder</h3>
-        <div className="flex space-x-2">
+        <div className="flex space-x-2 items-center">
+          <Link to="/recordings" className="text-[#E44E51] flex items-center hover:underline mr-2">
+            <VideoIcon className="w-4 h-4 mr-1" />
+            <span className="text-sm">My Recordings</span>
+          </Link>
+          
           <Tooltip content="Recording Settings">
             <button
               onClick={() => setShowSettings(!showSettings)}
@@ -761,6 +771,16 @@ export const VideoRecorder: React.FC = () => {
                 )}
               </AnimatePresence>
             </div>
+            
+            {/* Recordings link */}
+            <Link 
+              to="/recordings"
+              className="p-2 hover:bg-gray-100 rounded-lg"
+            >
+              <Tooltip content="View recordings">
+                <List className="w-5 h-5" />
+              </Tooltip>
+            </Link>
           </div>
         </div>
 

@@ -7,6 +7,7 @@ import VideoRecorderPage from './pages/features/VideoRecorderPage';
 import EditorPage from './pages/features/EditorPage';
 import ExportPage from './pages/features/ExportPage';
 import AnimationPage from './pages/features/AnimationPage';
+import RecordingsLibraryPage from './pages/RecordingsLibraryPage';
 
 // App components
 import { VideoRecorder } from './components/Recorder/VideoRecorder';
@@ -29,6 +30,7 @@ function App() {
       <Route path="/features/editor" element={<EditorPage />} />
       <Route path="/features/export" element={<ExportPage />} />
       <Route path="/features/animation" element={<AnimationPage />} />
+      <Route path="/recordings" element={<RecordingsLibraryPage />} />
       
       {/* App page */}
       <Route path="/app" element={<AppMain />} />

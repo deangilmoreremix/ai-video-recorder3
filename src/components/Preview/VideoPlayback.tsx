@@ -1,8 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   Play, Pause, SkipBack, SkipForward, 
-  Download, Upload, Volume2, VolumeX, Maximize2, Minimize2
+  Download, Upload, Volume2, VolumeX, Maximize2, Minimize2,
+  List
 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useEditorStore } from '../../store';
 import { AdvancedControls } from '../Controls/AdvancedControls';
 import { VideoEditor } from '../Editor/VideoEditor';
@@ -173,6 +175,12 @@ export const VideoPlayback: React.FC = () => {
                     className="w-24 accent-[#E44E51]"
                   />
                 </div>
+                <Link
+                  to="/recordings"
+                  className="p-2 text-white hover:text-[#E44E51] transition-colors"
+                >
+                  <List className="w-5 h-5" />
+                </Link>
                 <button
                   onClick={toggleFullscreen}
                   className="p-2 text-white hover:text-[#E44E51] transition-colors"
