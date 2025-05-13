@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence, useAnimation } from 'framer-motion';
-import { Link } from 'react-router-dom';
+import React, { useState, useEffect, useRef } from 'react';
+import { motion, useAnimation } from 'framer-motion';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   // Core icons
   Brain, Camera, Scissors, Type, Clock, Layout, Film, Download, Sparkles,
@@ -28,6 +28,7 @@ const AnimatedFeatureTiles: React.FC = () => {
   const [isGridView, setIsGridView] = useState(true);
   const [filteredFeatures, setFilteredFeatures] = useState<FeatureTile[]>([]);
   const controls = useAnimation();
+  const navigate = useNavigate();
 
   // Define feature categories
   const categories = [
@@ -404,6 +405,10 @@ const AnimatedFeatureTiles: React.FC = () => {
     return 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4';
   };
 
+  const handleFeatureClick = (link: string) => {
+    navigate(link);
+  };
+
   return (
     <div className="py-24 bg-gray-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -509,6 +514,7 @@ const AnimatedFeatureTiles: React.FC = () => {
                 }`}
                 onMouseEnter={() => setHoveredTile(feature.id)}
                 onMouseLeave={() => setHoveredTile(null)}
+                onClick={() => handleFeatureClick(feature.link)}
               >
                 {/* Icon Section */}
                 <div className={`${isGridView ? 'p-6' : 'p-6 md:w-64 flex-shrink-0'}`}>
@@ -573,6 +579,7 @@ const AnimatedFeatureTiles: React.FC = () => {
                         <Link
                           to={feature.link}
                           className="inline-flex items-center text-sm font-medium text-[#E44E51] hover:text-[#D43B3E] group"
+                          onClick={(e) => e.stopPropagation()}
                         >
                           <span>Learn more</span>
                           <motion.div
@@ -602,6 +609,7 @@ const AnimatedFeatureTiles: React.FC = () => {
                         <Link
                           to={feature.link}
                           className="inline-flex items-center text-sm font-medium text-[#E44E51] hover:text-[#D43B3E] group"
+                          onClick={(e) => e.stopPropagation()}
                         >
                           <span>Learn more</span>
                           <ArrowRight className="ml-2 w-4 h-4 transition-transform group-hover:translate-x-1" />
