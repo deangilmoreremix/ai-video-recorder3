@@ -79,7 +79,7 @@ const Navbar = () => {
             <div className="flex items-center space-x-8">
               <Link
                 to="/"
-                className={`${isScrolled ? 'text-gray-900' : 'text-white'} hover:text-[#E44E51] px-3 py-2 text-sm font-medium transition-colors duration-200`}
+                className={`${isScrolled ? 'text-gray-900' : 'text-gray-900'} hover:text-[#E44E51] px-3 py-2 text-sm font-medium transition-colors duration-200`}
               >
                 Home
               </Link>
@@ -89,7 +89,7 @@ const Navbar = () => {
                   ref={submenuButtonRef}
                   onClick={() => setIsSubmenuOpen(!isSubmenuOpen)}
                   onMouseEnter={() => setIsSubmenuOpen(true)}
-                  className={`${isScrolled ? 'text-gray-900' : 'text-white'} hover:text-[#E44E51] px-3 py-2 text-sm font-medium flex items-center transition-colors duration-200`}
+                  className={`${isScrolled ? 'text-gray-900' : 'text-gray-900'} hover:text-[#E44E51] px-3 py-2 text-sm font-medium flex items-center transition-colors duration-200`}
                 >
                   Features
                   <ChevronDown className={`ml-1 w-4 h-4 transition-transform duration-200 ${isSubmenuOpen ? 'rotate-180' : ''}`} />
@@ -125,14 +125,14 @@ const Navbar = () => {
               
               <a
                 href="#"
-                className={`${isScrolled ? 'text-gray-900' : 'text-white'} hover:text-[#E44E51] px-3 py-2 text-sm font-medium transition-colors duration-200`}
+                className={`${isScrolled ? 'text-gray-900' : 'text-gray-900'} hover:text-[#E44E51] px-3 py-2 text-sm font-medium transition-colors duration-200`}
               >
                 Pricing
               </a>
               
               <a
                 href="#"
-                className={`${isScrolled ? 'text-gray-900' : 'text-white'} hover:text-[#E44E51] px-3 py-2 text-sm font-medium transition-colors duration-200`}
+                className={`${isScrolled ? 'text-gray-900' : 'text-gray-900'} hover:text-[#E44E51] px-3 py-2 text-sm font-medium transition-colors duration-200`}
               >
                 Contact
               </a>
@@ -145,7 +145,7 @@ const Navbar = () => {
               className={`rounded px-4 py-2 text-sm font-medium ${
                 isScrolled 
                   ? 'bg-[#E44E51] text-white hover:bg-[#D43B3E]' 
-                  : 'bg-white text-[#E44E51] hover:bg-gray-100'
+                  : 'bg-[#E44E51] text-white hover:bg-[#D43B3E]'
               } transition-colors duration-200`}
             >
               Try Free
@@ -155,7 +155,7 @@ const Navbar = () => {
           <div className="-mr-2 flex md:hidden">
             <button
               onClick={() => setIsMenuOpen(!isMenuOpen)}
-              className={`inline-flex items-center justify-center p-2 rounded-md ${isScrolled ? 'text-gray-900' : 'text-white'} hover:text-[#E44E51] focus:outline-none`}
+              className={`inline-flex items-center justify-center p-2 rounded-md ${isScrolled ? 'text-gray-900' : 'text-gray-900'} hover:text-[#E44E51] focus:outline-none`}
             >
               <span className="sr-only">Open main menu</span>
               {isMenuOpen ? (
