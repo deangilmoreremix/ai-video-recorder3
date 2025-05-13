@@ -1,6 +1,10 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { ChevronRight, Search, Filter, Grid, Layout, Brain, Video, Scissors, Download, Sparkles, Camera, Trash2, ArrowRight, Layers } from 'lucide-react';
+import { 
+  ChevronRight, Search, Filter, Grid, Layout, Brain, 
+  Video, Scissors, Download, Sparkles, Camera, Trash2, 
+  ArrowRight, Layers
+} from 'lucide-react';
 
 const ComprehensiveFeatureSetExplainer = () => {
   return (
