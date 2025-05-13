@@ -123,19 +123,19 @@ const Navbar = () => {
                 )}
               </div>
               
-              <a
-                href="#"
+              <Link
+                to="/pricing"
                 className={`${isScrolled ? 'text-gray-900' : 'text-gray-900'} hover:text-[#E44E51] px-3 py-2 text-sm font-medium transition-colors duration-200`}
               >
                 Pricing
-              </a>
+              </Link>
               
-              <a
-                href="#"
+              <Link
+                to="/recordings"
                 className={`${isScrolled ? 'text-gray-900' : 'text-gray-900'} hover:text-[#E44E51] px-3 py-2 text-sm font-medium transition-colors duration-200`}
               >
-                Contact
-              </a>
+                My Recordings
+              </Link>
             </div>
           </div>
           
@@ -223,19 +223,19 @@ const Navbar = () => {
                 </AnimatePresence>
               </div>
               
-              <a
-                href="#"
+              <Link
+                to="/pricing"
                 className="block px-3 py-2 rounded-md text-base font-medium text-gray-900 hover:bg-gray-50"
               >
                 Pricing
-              </a>
+              </Link>
               
-              <a
-                href="#"
+              <Link
+                to="/recordings"
                 className="block px-3 py-2 rounded-md text-base font-medium text-gray-900 hover:bg-gray-50"
               >
-                Contact
-              </a>
+                My Recordings
+              </Link>
               
               <Link
                 to="/app"
