@@ -202,19 +202,19 @@ const Navbar = () => {
                       exit={{ opacity: 0, height: 0 }}
                     >
                       <div className="pl-4 space-y-1 bg-gray-50 rounded-md mx-3 py-2 mt-1">
-                        <Link to="/features/ai" className="block px-3 py-2 rounded-md text-base font-medium text-gray-900 hover:bg-gray-100 hover:text-[#E44E51]">
+                        <Link to="/features/ai" className="block px-3 py-2 rounded-md text-base font-medium text-gray-700 hover:bg-gray-100 hover:text-[#E44E51]">
                           AI Features
                         </Link>
-                        <Link to="/features/recorder" className="block px-3 py-2 rounded-md text-base font-medium text-gray-900 hover:bg-gray-100 hover:text-[#E44E51]">
+                        <Link to="/features/recorder" className="block px-3 py-2 rounded-md text-base font-medium text-gray-700 hover:bg-gray-100 hover:text-[#E44E51]">
                           Video Recorder
                         </Link>
-                        <Link to="/features/editor" className="block px-3 py-2 rounded-md text-base font-medium text-gray-900 hover:bg-gray-100 hover:text-[#E44E51]">
+                        <Link to="/features/editor" className="block px-3 py-2 rounded-md text-base font-medium text-gray-700 hover:bg-gray-100 hover:text-[#E44E51]">
                           Video Editor
                         </Link>
-                        <Link to="/features/export" className="block px-3 py-2 rounded-md text-base font-medium text-gray-900 hover:bg-gray-100 hover:text-[#E44E51]">
+                        <Link to="/features/export" className="block px-3 py-2 rounded-md text-base font-medium text-gray-700 hover:bg-gray-100 hover:text-[#E44E51]">
                           Export Options
                         </Link>
-                        <Link to="/features/animation" className="block px-3 py-2 rounded-md text-base font-medium text-gray-900 hover:bg-gray-100 hover:text-[#E44E51]">
+                        <Link to="/features/animation" className="block px-3 py-2 rounded-md text-base font-medium text-gray-700 hover:bg-gray-100 hover:text-[#E44E51]">
                           GIFs & Thumbnails
                         </Link>
                       </div>
