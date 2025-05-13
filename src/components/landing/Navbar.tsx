@@ -42,7 +42,7 @@ const Navbar = () => {
   }, [location]);
 
   return (
-    <header className={`sticky top-0 z-50 ${isScrolled ? 'bg-white/90 backdrop-blur-md shadow-md' : 'bg-transparent'} transition-all duration-300`}>
+    <header className={`sticky top-0 z-50 ${isScrolled ? 'bg-white shadow-md' : 'bg-transparent'} transition-all duration-300`}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           <div className="flex items-center">
@@ -62,45 +62,39 @@ const Navbar = () => {
                 Home
               </Link>
               
-              <div className="relative">
+              <div className="relative group">
                 <button
                   onClick={() => setIsSubmenuOpen(!isSubmenuOpen)}
+                  onMouseEnter={() => setIsSubmenuOpen(true)}
                   className={`text-${isScrolled ? 'gray-900' : 'white'} hover:text-[#E44E51] px-3 py-2 text-sm font-medium flex items-center transition-colors duration-200`}
                 >
                   Features
                   <ChevronDown className={`ml-1 w-4 h-4 transition-transform duration-200 ${isSubmenuOpen ? 'rotate-180' : ''}`} />
                 </button>
                 
-                <AnimatePresence>
-                  {isSubmenuOpen && (
-                    <motion.div
-                      initial={{ opacity: 0, y: -10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -10 }}
-                      transition={{ duration: 0.2 }}
-                      className="absolute right-0 mt-2 w-56 origin-top-right rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none z-50"
-                      onMouseLeave={() => setIsSubmenuOpen(false)}
-                    >
-                      <div className="py-1">
-                        <Link to="/features/ai" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                          AI Features
-                        </Link>
-                        <Link to="/features/recorder" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                          Video Recorder
-                        </Link>
-                        <Link to="/features/editor" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                          Video Editor
-                        </Link>
-                        <Link to="/features/export" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                          Export Options
-                        </Link>
-                        <Link to="/features/animation" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                          GIFs & Thumbnails
-                        </Link>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                <div
+                  className={`absolute left-0 mt-1 w-56 rounded-md shadow-lg ${isScrolled ? 'bg-white' : 'bg-white'} ring-1 ring-black ring-opacity-5 focus:outline-none z-50 ${isSubmenuOpen ? 'block' : 'hidden'}`}
+                  onMouseEnter={() => setIsSubmenuOpen(true)}
+                  onMouseLeave={() => setIsSubmenuOpen(false)}
+                >
+                  <div className="py-1">
+                    <Link to="/features/ai" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                      AI Features
+                    </Link>
+                    <Link to="/features/recorder" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                      Video Recorder
+                    </Link>
+                    <Link to="/features/editor" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                      Video Editor
+                    </Link>
+                    <Link to="/features/export" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                      Export Options
+                    </Link>
+                    <Link to="/features/animation" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                      GIFs & Thumbnails
+                    </Link>
+                  </div>
+                </div>
               </div>
               
               <a
@@ -181,20 +175,20 @@ const Navbar = () => {
                       animate={{ opacity: 1, height: 'auto' }}
                       exit={{ opacity: 0, height: 0 }}
                     >
-                      <div className="pl-4 space-y-1">
-                        <Link to="/features/ai" className="block px-3 py-2 rounded-md text-base font-medium text-gray-900 hover:bg-gray-50">
+                      <div className="pl-4 space-y-1 bg-gray-50 rounded-md mx-3 py-2 mt-1">
+                        <Link to="/features/ai" className="block px-3 py-2 rounded-md text-base font-medium text-gray-900 hover:bg-gray-100">
                           AI Features
                         </Link>
-                        <Link to="/features/recorder" className="block px-3 py-2 rounded-md text-base font-medium text-gray-900 hover:bg-gray-50">
+                        <Link to="/features/recorder" className="block px-3 py-2 rounded-md text-base font-medium text-gray-900 hover:bg-gray-100">
                           Video Recorder
                         </Link>
-                        <Link to="/features/editor" className="block px-3 py-2 rounded-md text-base font-medium text-gray-900 hover:bg-gray-50">
+                        <Link to="/features/editor" className="block px-3 py-2 rounded-md text-base font-medium text-gray-900 hover:bg-gray-100">
                           Video Editor
                         </Link>
-                        <Link to="/features/export" className="block px-3 py-2 rounded-md text-base font-medium text-gray-900 hover:bg-gray-50">
+                        <Link to="/features/export" className="block px-3 py-2 rounded-md text-base font-medium text-gray-900 hover:bg-gray-100">
                           Export Options
                         </Link>
-                        <Link to="/features/animation" className="block px-3 py-2 rounded-md text-base font-medium text-gray-900 hover:bg-gray-50">
+                        <Link to="/features/animation" className="block px-3 py-2 rounded-md text-base font-medium text-gray-900 hover:bg-gray-100">
                           GIFs & Thumbnails
                         </Link>
                       </div>
@@ -219,7 +213,7 @@ const Navbar = () => {
               
               <Link
                 to="/app"
-                className="block px-3 py-2 rounded-md text-base font-medium bg-[#E44E51] text-white hover:bg-[#D43B3E]"
+                className="block px-3 py-2 rounded-md text-base font-medium bg-[#E44E51] text-white hover:bg-[#D43B3E] mt-2"
               >
                 Try Free
               </Link>
