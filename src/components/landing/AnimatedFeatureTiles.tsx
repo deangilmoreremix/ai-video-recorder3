@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { motion, useAnimation } from 'framer-motion';
+import { motion, AnimatePresence, useAnimation } from 'framer-motion';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   // Core icons
@@ -396,6 +396,10 @@ const AnimatedFeatureTiles: React.FC = () => {
     setHoveredTile(null);
   };
 
+  const handleFeatureClick = (link: string) => {
+    navigate(link);
+  };
+
   // Calculate number of columns based on category
   const getGridColumns = () => {
     if (!isGridView) return 'grid-cols-1';
@@ -403,10 +407,6 @@ const AnimatedFeatureTiles: React.FC = () => {
     const count = filteredFeatures.length;
     if (count <= 4) return 'grid-cols-1 md:grid-cols-2 lg:grid-cols-2';
     return 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4';
-  };
-
-  const handleFeatureClick = (link: string) => {
-    navigate(link);
   };
 
   return (
