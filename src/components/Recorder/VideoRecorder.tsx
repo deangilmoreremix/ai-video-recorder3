@@ -4,7 +4,7 @@ import {
   Play, Pause, Square, Brain, Camera, Monitor, Layout,
   Settings, HelpCircle, Download, Save, Mic, MicOff,
   ChevronDown, Sliders, RefreshCw, Eye, X, Video as VideoIcon,
-  List, AlertCircle
+  List, AlertCircle, Info, Check
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAIFeatures } from '../../hooks/useAIFeatures';
@@ -35,7 +35,11 @@ export const VideoRecorder: React.FC = () => {
   const [showDownloadDialog, setShowDownloadDialog] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
-  const [disableAIProcessing, setDisableAIProcessing] = useState(false);
+  const [simpleModeEnabled, setSimpleModeEnabled] = useState(false);
+  const [permissionStatus, setPermissionStatus] = useState<{camera: boolean, microphone: boolean}>({
+    camera: false,
+    microphone: false
+  });
 
   // Error state for debugging
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -55,10 +59,25 @@ export const VideoRecorder: React.FC = () => {
   const [showVideoMenu, setShowVideoMenu] = useState(false);
 
   // AI state
-  const [showAIFeatures, setShowAIFeatures] = useState(true); // Set to true by default to always show AI features
+  const [showAIFeatures, setShowAIFeatures] = useState(true); 
   const [videoProcessed, setVideoProcessed] = useState(false);
   const [processedVideoUrl, setProcessedVideoUrl] = useState<string | null>(null);
   const [showFullAI, setShowFullAI] = useState(false);
+
+  // Browser compatibility check results
+  const [browserCompatibility, setBrowserCompatibility] = useState<{
+    compatible: boolean,
+    mediaDevices: boolean,
+    mediaRecorder: boolean,
+    getUserMedia: boolean,
+    secureContext: boolean
+  }>({
+    compatible: false,
+    mediaDevices: false,
+    mediaRecorder: false,
+    getUserMedia: false,
+    secureContext: false
+  });
 
   // Refs
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -77,21 +96,102 @@ export const VideoRecorder: React.FC = () => {
     return `${mins}:${secs}`;
   };
 
+  // Check browser compatibility
+  useEffect(() => {
+    // Check if we're in a secure context (HTTPS or localhost)
+    const isSecureContext = window.isSecureContext;
+    
+    // Check if MediaDevices API is available
+    const hasMediaDevices = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+    
+    // Check if MediaRecorder API is available
+    const hasMediaRecorder = typeof MediaRecorder !== 'undefined';
+    
+    // Check if getUserMedia is available
+    const hasGetUserMedia = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+    
+    // Set compatibility status
+    const isCompatible = isSecureContext && hasMediaDevices && hasMediaRecorder && hasGetUserMedia;
+    
+    setBrowserCompatibility({
+      compatible: isCompatible,
+      mediaDevices: hasMediaDevices,
+      mediaRecorder: hasMediaRecorder,
+      getUserMedia: hasGetUserMedia,
+      secureContext: isSecureContext
+    });
+    
+    setDebugInfo(prev => ({
+      ...prev,
+      browserCompatibility: {
+        compatible: isCompatible,
+        mediaDevices: hasMediaDevices,
+        mediaRecorder: hasMediaRecorder,
+        getUserMedia: hasGetUserMedia,
+        secureContext: isSecureContext,
+        userAgent: navigator.userAgent
+      }
+    }));
+    
+    if (!isCompatible) {
+      setErrorMessage("Your browser doesn't fully support video recording. Please try Chrome, Firefox or Edge.");
+    }
+  }, []);
+
   // Load AI models on component mount
   useEffect(() => {
-    loadModels().catch(err => {
-      console.error("Failed to load AI models:", err);
-      setDebugInfo(prev => ({
-        ...prev,
-        aiModelsError: err.message || String(err)
-      }));
-    });
-  }, [loadModels]);
+    if (!simpleModeEnabled) {
+      loadModels().catch(err => {
+        console.error("Failed to load AI models:", err);
+        setDebugInfo(prev => ({
+          ...prev,
+          aiModelsError: err.message || String(err)
+        }));
+      });
+    }
+  }, [loadModels, simpleModeEnabled]);
 
-  // Get available audio devices
+  // Get available audio devices and request permissions
   useEffect(() => {
-    const getDevices = async () => {
+    const requestPermissionsAndGetDevices = async () => {
       try {
+        // Request camera and microphone permissions
+        let stream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: true
+          });
+          
+          // Permissions granted
+          setPermissionStatus({
+            camera: true,
+            microphone: true
+          });
+          
+          // Stop tracks immediately after permissions are granted
+          stream.getTracks().forEach(track => track.stop());
+        } catch (err) {
+          console.error('Error requesting permissions:', err);
+          
+          // Check which permission failed
+          if (err instanceof DOMException) {
+            if (err.name === 'NotAllowedError') {
+              setErrorMessage('Camera or microphone access denied. Please allow access in your browser settings.');
+            } else if (err.name === 'NotFoundError') {
+              setErrorMessage('Camera or microphone not found. Please check your device connections.');
+            } else {
+              setErrorMessage(`Device error: ${err.name}`);
+            }
+          }
+          
+          setDebugInfo(prev => ({
+            ...prev,
+            permissionError: err instanceof Error ? err.message : String(err)
+          }));
+        }
+        
+        // Enumerate devices after requesting permissions
         const devices = await navigator.mediaDevices.enumerateDevices();
         
         const audioInputs = devices
@@ -122,7 +222,8 @@ export const VideoRecorder: React.FC = () => {
         setDebugInfo(prev => ({
           ...prev,
           audioDevices: audioInputs.length,
-          videoDevices: videoInputs.length
+          videoDevices: videoInputs.length,
+          deviceLabelsAvailable: devices.some(device => device.label && device.label.length > 0)
         }));
       } catch (error) {
         console.error('Error getting media devices:', error);
@@ -133,10 +234,16 @@ export const VideoRecorder: React.FC = () => {
       }
     };
 
-    getDevices();
-    navigator.mediaDevices.addEventListener('devicechange', getDevices);
+    requestPermissionsAndGetDevices();
+    
+    // Listen for device changes
+    navigator.mediaDevices.addEventListener('devicechange', () => {
+      console.log('Device change detected, refreshing device list');
+      requestPermissionsAndGetDevices();
+    });
+    
     return () => {
-      navigator.mediaDevices.removeEventListener('devicechange', getDevices);
+      navigator.mediaDevices.removeEventListener('devicechange', requestPermissionsAndGetDevices);
     };
   }, []);
 
@@ -195,15 +302,17 @@ export const VideoRecorder: React.FC = () => {
       }
     };
     
-    setupInitialPreview();
-  }, [selectedCameraId]);
+    if (permissionStatus.camera) {
+      setupInitialPreview();
+    }
+  }, [selectedCameraId, permissionStatus.camera]);
 
   // Process frames with AI when not recording
   useEffect(() => {
     let animationFrame: number;
     
     const processCameraPreview = async () => {
-      if (isRecording || !videoRef.current || !isModelsLoaded || disableAIProcessing) {
+      if (isRecording || !videoRef.current || !isModelsLoaded || simpleModeEnabled) {
         animationFrame = requestAnimationFrame(processCameraPreview);
         return;
       }
@@ -251,14 +360,14 @@ export const VideoRecorder: React.FC = () => {
       animationFrame = requestAnimationFrame(processCameraPreview);
     };
     
-    if (!isRecording && !showFullAI && !disableAIProcessing) {
+    if (!isRecording && !showFullAI && !simpleModeEnabled) {
       processCameraPreview();
     }
     
     return () => {
       cancelAnimationFrame(animationFrame);
     };
-  }, [isRecording, showFullAI, processFrame, isModelsLoaded, features, disableAIProcessing]);
+  }, [isRecording, showFullAI, processFrame, isModelsLoaded, features, simpleModeEnabled]);
 
   const checkMediaRecorderSupport = () => {
     // Check if MediaRecorder is supported
@@ -652,6 +761,101 @@ export const VideoRecorder: React.FC = () => {
     }
   };
 
+  const startSimpleModeRecording = async () => {
+    // Reset error states
+    setErrorMessage(null);
+    setIsProcessing(true);
+    chunksRef.current = [];
+    setRecordingTime(0);
+    
+    try {
+      // Use the most basic settings possible
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true
+      });
+      
+      streamRef.current = stream;
+      
+      // Display the stream
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.muted = true;
+        await videoRef.current.play();
+      }
+      
+      // Use the most basic recorder possible
+      try {
+        mediaRecorderRef.current = new MediaRecorder(stream);
+      } catch (err) {
+        setErrorMessage('Your browser doesn\'t support MediaRecorder. Please try a different browser.');
+        throw err;
+      }
+      
+      // Set up data handler
+      mediaRecorderRef.current.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          chunksRef.current.push(e.data);
+        }
+      };
+      
+      // Handle recording stop
+      mediaRecorderRef.current.onstop = () => {
+        try {
+          const blob = new Blob(chunksRef.current, { type: 'video/webm' });
+          setRecordedBlob(blob);
+          
+          // Clean up
+          if (timerIntervalRef.current) {
+            clearInterval(timerIntervalRef.current);
+            timerIntervalRef.current = null;
+          }
+          
+          if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop());
+            streamRef.current = null;
+          }
+          
+          // Show download dialog
+          setShowDownloadDialog(true);
+        } catch (err) {
+          console.error('Error creating blob:', err);
+          setErrorMessage('Failed to create video from recording. Please try again.');
+        }
+      };
+      
+      // Start recording
+      mediaRecorderRef.current.start(1000);
+      setIsRecording(true);
+      
+      // Start timer
+      timerIntervalRef.current = setInterval(() => {
+        setRecordingTime(prevTime => prevTime + 1);
+      }, 1000);
+      
+    } catch (err) {
+      console.error('Error in simple mode recording:', err);
+      let errorMsg = 'Failed to start simple recording';
+      
+      if (err instanceof DOMException) {
+        switch(err.name) {
+          case 'NotAllowedError':
+            errorMsg = 'Camera or microphone permission denied. Please allow access in your browser settings.';
+            break;
+          case 'NotFoundError':
+            errorMsg = 'No camera or microphone found. Please check your device connections.';
+            break;
+          default:
+            errorMsg = `Error: ${err.name} - ${err.message}`;
+        }
+      }
+      
+      setErrorMessage(errorMsg);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const stopRecording = () => {
     if (mediaRecorderRef.current && isRecording) {
       try {
@@ -771,6 +975,133 @@ export const VideoRecorder: React.FC = () => {
     setRecordedBlob(processedBlob);
   };
 
+  // Request camera and microphone permissions explicitly
+  const requestPermissions = async () => {
+    try {
+      setIsProcessing(true);
+      
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true
+      });
+      
+      // Update permission status
+      setPermissionStatus({
+        camera: true,
+        microphone: true
+      });
+      
+      // Store the stream for preview
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        streamRef.current = stream;
+        videoRef.current.play().catch(err => {
+          console.warn("Autoplay prevented:", err);
+        });
+      }
+      
+      // Refresh device list now that we have permission
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      
+      const audioInputs = devices
+        .filter(device => device.kind === 'audioinput')
+        .map(device => ({
+          deviceId: device.deviceId,
+          label: device.label || `Microphone ${device.deviceId.slice(0, 5)}...`
+        }));
+      
+      setAudioDevices(audioInputs);
+      
+      const videoInputs = devices
+        .filter(device => device.kind === 'videoinput')
+        .map(device => ({
+          deviceId: device.deviceId,
+          label: device.label || `Camera ${device.deviceId.slice(0, 5)}...`
+        }));
+      setVideoDevices(videoInputs);
+      
+      // Set default devices if needed
+      if (!selectedMicId && audioInputs.length > 0) {
+        setSelectedMicId(audioInputs[0].deviceId);
+      }
+      if (!selectedCameraId && videoInputs.length > 0) {
+        setSelectedCameraId(videoInputs[0].deviceId);
+      }
+      
+      setErrorMessage(null);
+    } catch (err) {
+      console.error('Error requesting permissions:', err);
+      
+      let errorMsg = 'Failed to get camera or microphone access';
+      if (err instanceof DOMException) {
+        switch(err.name) {
+          case 'NotAllowedError':
+            errorMsg = 'Permission denied. Please allow camera and microphone access in your browser settings.';
+            break;
+          case 'NotFoundError':
+            errorMsg = 'No camera or microphone found. Please connect a device and try again.';
+            break;
+          case 'NotReadableError':
+            errorMsg = 'Could not access your camera or microphone. They may be in use by another application.';
+            break;
+          default:
+            errorMsg = `Error: ${err.name}`;
+        }
+      }
+      
+      setErrorMessage(errorMsg);
+      setDebugInfo(prev => ({
+        ...prev,
+        permissionRequestError: err instanceof Error ? err.message : String(err)
+      }));
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // Check what's supported in this browser
+  const checkSupportedFormats = () => {
+    const formats = [
+      'video/webm',
+      'video/webm;codecs=vp8',
+      'video/webm;codecs=vp9',
+      'video/webm;codecs=h264',
+      'video/mp4',
+      'video/mp4;codecs=h264',
+      'video/x-matroska',
+      'video/ogg'
+    ];
+    
+    const supportedFormats = formats.filter(format => MediaRecorder.isTypeSupported(format));
+    
+    setDebugInfo(prev => ({
+      ...prev,
+      supportedRecordingFormats: supportedFormats,
+      checkTime: new Date().toISOString()
+    }));
+  };
+
+  const resetRecorder = () => {
+    // Stop any active streams
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    
+    // Clear errors
+    setErrorMessage(null);
+    
+    // Reset states
+    setIsProcessing(false);
+    setIsRecording(false);
+    setIsPaused(false);
+    setShowDebugInfo(false);
+    setDebugInfo({});
+    
+    // Re-request permissions
+    requestPermissions();
+  };
+
   return (
     <div className="bg-white rounded-lg shadow-lg p-4">
       <div className="flex items-center justify-between mb-4">
@@ -800,18 +1131,98 @@ export const VideoRecorder: React.FC = () => {
         </div>
       </div>
 
+      {/* Browser Compatibility Warning */}
+      {!browserCompatibility.compatible && (
+        <div className="mb-4 p-3 bg-yellow-100 text-yellow-800 rounded-lg flex items-start">
+          <AlertCircle className="w-5 h-5 mr-2 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="font-medium">Your browser may not fully support video recording.</p>
+            <p className="mt-1 text-sm">For best results, please use Chrome, Firefox, or Edge.</p>
+            <button 
+              className="text-sm text-yellow-700 underline mt-1"
+              onClick={() => setShowDebugInfo(!showDebugInfo)}
+            >
+              {showDebugInfo ? 'Hide technical details' : 'Show technical details'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Permission Request Banner */}
+      {(!permissionStatus.camera || !permissionStatus.microphone) && (
+        <div className="mb-4 p-3 bg-blue-100 text-blue-800 rounded-lg flex items-start">
+          <Info className="w-5 h-5 mr-2 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="font-medium">Camera and microphone access required</p>
+            <p className="mt-1 text-sm">Please allow access to record video and audio.</p>
+            <button 
+              className="mt-2 px-3 py-1 bg-blue-700 text-white rounded text-sm"
+              onClick={requestPermissions}
+              disabled={isProcessing}
+            >
+              {isProcessing ? 'Requesting...' : 'Grant Access'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Simple Mode Toggle */}
+      {(errorMessage || !browserCompatibility.compatible) && (
+        <div className="mb-4 p-3 bg-green-100 text-green-800 rounded-lg flex items-start">
+          <Info className="w-5 h-5 mr-2 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="font-medium">Try Simple Mode</p>
+            <p className="mt-1 text-sm">
+              Simple mode uses basic recording without AI features for better compatibility.
+            </p>
+            <label className="mt-2 inline-flex items-center cursor-pointer">
+              <span className="mr-3 text-sm font-medium text-green-800">Enable Simple Mode</span>
+              <div className="relative">
+                <input 
+                  type="checkbox" 
+                  className="sr-only peer"
+                  checked={simpleModeEnabled}
+                  onChange={() => setSimpleModeEnabled(!simpleModeEnabled)}
+                />
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 
+                  peer-focus:ring-green-300 rounded-full peer peer-checked:after:translate-x-full 
+                  peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] 
+                  after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full 
+                  after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600" />
+              </div>
+            </label>
+          </div>
+        </div>
+      )}
+
       {/* Error Message Display */}
       {errorMessage && (
         <div className="mb-4 p-3 bg-red-100 text-red-800 rounded-lg flex items-start">
           <AlertCircle className="w-5 h-5 mr-2 flex-shrink-0 mt-0.5" />
           <div>
             <p className="font-medium">{errorMessage}</p>
-            <button 
-              className="text-sm text-red-700 underline mt-1"
-              onClick={() => setShowDebugInfo(!showDebugInfo)}
-            >
-              {showDebugInfo ? 'Hide debugging info' : 'Show debugging info'}
-            </button>
+            <div className="mt-1 flex space-x-4">
+              <button 
+                className="text-sm text-red-700 underline"
+                onClick={() => setShowDebugInfo(!showDebugInfo)}
+              >
+                {showDebugInfo ? 'Hide debugging info' : 'Show debugging info'}
+              </button>
+              
+              <button
+                className="text-sm text-red-700 underline"
+                onClick={resetRecorder}
+              >
+                Reset & Try Again
+              </button>
+              
+              <button
+                className="text-sm text-red-700 underline"
+                onClick={checkSupportedFormats}
+              >
+                Check Supported Formats
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -820,16 +1231,16 @@ export const VideoRecorder: React.FC = () => {
       {showDebugInfo && (
         <div className="mb-4 p-3 bg-gray-100 rounded-lg text-xs font-mono overflow-x-auto">
           <h4 className="font-medium text-sm mb-2">Debug Information</h4>
-          <pre>{JSON.stringify(debugInfo, null, 2)}</pre>
+          <pre className="max-h-40 overflow-y-auto">{JSON.stringify(debugInfo, null, 2)}</pre>
           
           <div className="mt-3 pt-3 border-t border-gray-300 flex space-x-3">
             <button
-              onClick={() => setDisableAIProcessing(!disableAIProcessing)}
+              onClick={() => setSimpleModeEnabled(!simpleModeEnabled)}
               className={`px-3 py-1.5 text-sm rounded ${
-                disableAIProcessing ? 'bg-green-600 text-white' : 'bg-gray-200'
+                simpleModeEnabled ? 'bg-green-600 text-white' : 'bg-gray-200'
               }`}
             >
-              {disableAIProcessing ? 'AI Processing Disabled' : 'Disable AI Processing'}
+              {simpleModeEnabled ? 'Simple Mode Enabled' : 'Enable Simple Mode'}
             </button>
             
             <button
@@ -886,6 +1297,23 @@ export const VideoRecorder: React.FC = () => {
           </div>
         )}
 
+        {/* No Camera Overlay */}
+        {!permissionStatus.camera && !isProcessing && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/70 z-20">
+            <div className="text-center text-white p-4">
+              <Camera className="w-16 h-16 mx-auto mb-4 opacity-50" />
+              <h3 className="text-xl font-medium mb-2">Camera access needed</h3>
+              <p className="mb-4">Please allow access to your camera to start recording</p>
+              <button
+                onClick={requestPermissions}
+                className="px-4 py-2 bg-[#E44E51] hover:bg-[#D43B3E] rounded-lg transition-colors"
+              >
+                Grant Camera Access
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Processing Overlay */}
         <AIProcessingOverlay
           isVisible={isProcessing}
@@ -921,6 +1349,14 @@ export const VideoRecorder: React.FC = () => {
           <div className="absolute top-4 left-4 bg-green-600 px-3 py-1 rounded-full text-white text-sm flex items-center space-x-2">
             <RefreshCw className="w-4 h-4" />
             <span>AI Processing Applied</span>
+          </div>
+        )}
+        
+        {/* Simple Mode Indicator */}
+        {simpleModeEnabled && (
+          <div className="absolute top-4 right-4 bg-green-600 px-3 py-1 rounded-full text-white text-sm flex items-center space-x-2">
+            <Check className="w-4 h-4" />
+            <span>Simple Mode</span>
           </div>
         )}
       </div>
@@ -1248,32 +1684,34 @@ export const VideoRecorder: React.FC = () => {
           )}
         </AnimatePresence>
 
-        {/* AI Features Panel - Always shown */}
-        <div className="bg-gray-50 p-4 rounded-lg space-y-4">
-          <div className="flex justify-between items-center">
-            <h4 className="text-sm font-medium">AI Features</h4>
-            <button 
-              onClick={() => setShowFullAI(true)}
-              className="text-sm text-[#E44E51] font-medium"
-            >
-              Advanced Mode
-            </button>
+        {/* AI Features Panel - Only shown when not in simple mode */}
+        {!simpleModeEnabled && showAIFeatures && (
+          <div className="bg-gray-50 p-4 rounded-lg space-y-4">
+            <div className="flex justify-between items-center">
+              <h4 className="text-sm font-medium">AI Features</h4>
+              <button 
+                onClick={() => setShowFullAI(true)}
+                className="text-sm text-[#E44E51] font-medium"
+              >
+                Advanced Mode
+              </button>
+            </div>
+            
+            <AIFeatureGrid
+              enabledFeatures={features}
+              onFeatureToggle={toggleFeature}
+              isProcessing={isProcessing}
+              compact={true}
+            />
           </div>
-          
-          <AIFeatureGrid
-            enabledFeatures={features}
-            onFeatureToggle={toggleFeature}
-            isProcessing={isProcessing}
-            compact={true}
-          />
-        </div>
+        )}
 
         {/* Record Button */}
         <div className="flex justify-center">
           {!isRecording ? (
             <button
-              onClick={startRecording}
-              disabled={isProcessing}
+              onClick={simpleModeEnabled ? startSimpleModeRecording : startRecording}
+              disabled={isProcessing || (!permissionStatus.camera || !permissionStatus.microphone)}
               className="flex items-center space-x-2 px-6 py-2 bg-[#E44E51] text-white rounded-lg 
                 hover:bg-[#D43B3E] shadow-lg hover:shadow-[#E44E51]/25 disabled:opacity-50"
             >
