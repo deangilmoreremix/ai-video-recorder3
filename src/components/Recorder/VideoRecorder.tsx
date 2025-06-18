@@ -4,7 +4,7 @@ import {
   Play, Pause, Square, Brain, Camera, Monitor, Layout,
   Settings, HelpCircle, Download, Save, Mic, MicOff,
   ChevronDown, Sliders, RefreshCw, Eye, X, Video as VideoIcon,
-  List
+  List, AlertCircle
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAIFeatures } from '../../hooks/useAIFeatures';
@@ -35,6 +35,12 @@ export const VideoRecorder: React.FC = () => {
   const [showDownloadDialog, setShowDownloadDialog] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
+  const [disableAIProcessing, setDisableAIProcessing] = useState(false);
+
+  // Error state for debugging
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [showDebugInfo, setShowDebugInfo] = useState(false);
+  const [debugInfo, setDebugInfo] = useState<Record<string, any>>({});
 
   // Audio state
   const [audioDevices, setAudioDevices] = useState<AudioDevice[]>([]);
@@ -75,6 +81,10 @@ export const VideoRecorder: React.FC = () => {
   useEffect(() => {
     loadModels().catch(err => {
       console.error("Failed to load AI models:", err);
+      setDebugInfo(prev => ({
+        ...prev,
+        aiModelsError: err.message || String(err)
+      }));
     });
   }, [loadModels]);
 
@@ -108,8 +118,18 @@ export const VideoRecorder: React.FC = () => {
         if (!selectedCameraId && videoInputs.length > 0) {
           setSelectedCameraId(videoInputs[0].deviceId);
         }
+
+        setDebugInfo(prev => ({
+          ...prev,
+          audioDevices: audioInputs.length,
+          videoDevices: videoInputs.length
+        }));
       } catch (error) {
         console.error('Error getting media devices:', error);
+        setDebugInfo(prev => ({
+          ...prev,
+          deviceError: error instanceof Error ? error.message : String(error)
+        }));
       }
     };
 
@@ -151,13 +171,27 @@ export const VideoRecorder: React.FC = () => {
           if (videoRef.current) {
             videoRef.current.srcObject = stream;
             streamRef.current = stream;
-            videoRef.current.play();
+            videoRef.current.play().catch(err => {
+              console.warn("Autoplay prevented:", err);
+              setDebugInfo(prev => ({
+                ...prev,
+                autoplayError: err.message || String(err)
+              }));
+            });
           }
         } catch (err) {
           console.error('Error setting up initial preview:', err);
+          setDebugInfo(prev => ({
+            ...prev,
+            previewError: err instanceof Error ? err.message : String(err)
+          }));
         }
       } catch (err) {
         console.error('Error setting up initial preview:', err);
+        setDebugInfo(prev => ({
+          ...prev,
+          previewSetupError: err instanceof Error ? err.message : String(err)
+        }));
       }
     };
     
@@ -169,7 +203,7 @@ export const VideoRecorder: React.FC = () => {
     let animationFrame: number;
     
     const processCameraPreview = async () => {
-      if (isRecording || !videoRef.current || !isModelsLoaded) {
+      if (isRecording || !videoRef.current || !isModelsLoaded || disableAIProcessing) {
         animationFrame = requestAnimationFrame(processCameraPreview);
         return;
       }
@@ -207,26 +241,61 @@ export const VideoRecorder: React.FC = () => {
           }
         } catch (error) {
           console.error('Error processing preview:', error);
+          setDebugInfo(prev => ({
+            ...prev,
+            previewProcessingError: error instanceof Error ? error.message : String(error)
+          }));
         }
       }
       
       animationFrame = requestAnimationFrame(processCameraPreview);
     };
     
-    if (!isRecording && !showFullAI) {
+    if (!isRecording && !showFullAI && !disableAIProcessing) {
       processCameraPreview();
     }
     
     return () => {
       cancelAnimationFrame(animationFrame);
     };
-  }, [isRecording, showFullAI, processFrame, isModelsLoaded, features]);
+  }, [isRecording, showFullAI, processFrame, isModelsLoaded, features, disableAIProcessing]);
 
-  const startRecording = async () => {
-    setIsProcessing(true);
-    chunksRef.current = [];
-    setRecordingTime(0);
+  const checkMediaRecorderSupport = () => {
+    // Check if MediaRecorder is supported
+    if (typeof MediaRecorder === 'undefined') {
+      setErrorMessage('MediaRecorder API is not supported in your browser');
+      setDebugInfo(prev => ({
+        ...prev,
+        mediaRecorderSupported: false
+      }));
+      return false;
+    }
+
+    // Check MIME type support
+    const mimeTypes = [
+      'video/webm;codecs=vp9,opus',
+      'video/webm;codecs=vp8,opus',
+      'video/webm',
+      'video/mp4'
+    ];
+
+    const supportedTypes = mimeTypes.filter(type => MediaRecorder.isTypeSupported(type));
     
+    setDebugInfo(prev => ({
+      ...prev,
+      supportedMimeTypes: supportedTypes,
+      mediaRecorderSupported: true
+    }));
+
+    if (supportedTypes.length === 0) {
+      setErrorMessage('No supported video MIME types found in your browser');
+      return false;
+    }
+
+    return supportedTypes[0]; // Return the first supported type
+  };
+
+  const getMediaStreamWithErrorHandling = async (mode: 'webcam' | 'screen' | 'pip') => {
     try {
       let stream: MediaStream;
       const audioConstraints = {
@@ -240,34 +309,85 @@ export const VideoRecorder: React.FC = () => {
         ? { deviceId: { exact: selectedCameraId } }
         : true;
 
-      switch (recordingMode) {
+      switch (mode) {
         case 'screen':
-          const screenStream = await navigator.mediaDevices.getDisplayMedia({ 
-            video: { 
-              frameRate: { ideal: 30 },
-              width: { ideal: 1920 },
-              height: { ideal: 1080 }
-            },
-            audio: true 
-          });
-          
-          let micStream;
           try {
-            micStream = await navigator.mediaDevices.getUserMedia({ 
-              audio: audioConstraints 
+            const screenStream = await navigator.mediaDevices.getDisplayMedia({ 
+              video: { 
+                frameRate: { ideal: 30 },
+                width: { ideal: 1920 },
+                height: { ideal: 1080 }
+              },
+              audio: true 
             });
+            
+            let micStream;
+            try {
+              micStream = await navigator.mediaDevices.getUserMedia({ 
+                audio: audioConstraints 
+              });
+            } catch (err) {
+              console.warn('Unable to access microphone, recording without audio:', err);
+              
+              let errorMessage = 'Microphone access error';
+              if (err instanceof DOMException) {
+                switch(err.name) {
+                  case 'NotAllowedError':
+                    errorMessage = 'Microphone permission denied';
+                    break;
+                  case 'NotFoundError':
+                    errorMessage = 'No microphone found';
+                    break;
+                  case 'NotReadableError':
+                    errorMessage = 'Microphone is already in use';
+                    break;
+                  default:
+                    errorMessage = `Microphone error: ${err.name}`;
+                }
+              }
+              
+              setDebugInfo(prev => ({
+                ...prev,
+                microphoneError: errorMessage
+              }));
+            }
+            
+            const screenTracks = screenStream.getTracks();
+            const audioTracks = micStream ? micStream.getAudioTracks() : [];
+            
+            stream = new MediaStream([
+              ...screenTracks,
+              ...audioTracks
+            ]);
+            break;
           } catch (err) {
-            console.warn('Unable to access microphone, recording without audio:', err);
+            let errorMessage = 'Screen sharing error';
+            if (err instanceof DOMException) {
+              switch(err.name) {
+                case 'NotAllowedError':
+                  errorMessage = 'Screen sharing permission denied';
+                  break;
+                case 'NotFoundError':
+                  errorMessage = 'No screen found to share';
+                  break;
+                case 'NotReadableError':
+                  errorMessage = 'Screen is already being captured';
+                  break;
+                case 'AbortError':
+                  errorMessage = 'Screen share was canceled by the user';
+                  break;
+                default:
+                  errorMessage = `Screen sharing error: ${err.name}`;
+              }
+            }
+            
+            setErrorMessage(errorMessage);
+            setDebugInfo(prev => ({
+              ...prev,
+              screenSharingError: errorMessage
+            }));
+            throw err;
           }
-          
-          const screenTracks = screenStream.getTracks();
-          const audioTracks = micStream ? micStream.getAudioTracks() : [];
-          
-          stream = new MediaStream([
-            ...screenTracks,
-            ...audioTracks
-          ]);
-          break;
           
         case 'pip':
           try {
@@ -297,97 +417,178 @@ export const VideoRecorder: React.FC = () => {
               ...webcamAudioTracks
             ]);
           } catch (err) {
-            console.error('Error setting up PiP mode:', err);
-            throw new Error('Failed to set up Picture-in-Picture mode. Please try again.');
+            let errorMessage = 'PiP mode error';
+            if (err instanceof DOMException) {
+              switch(err.name) {
+                case 'NotAllowedError':
+                  errorMessage = 'Permission denied for camera, microphone, or screen';
+                  break;
+                case 'NotFoundError':
+                  errorMessage = 'Required device not found';
+                  break;
+                case 'AbortError':
+                  errorMessage = 'Setup was canceled by the user';
+                  break;
+                default:
+                  errorMessage = `PiP setup error: ${err.name}`;
+              }
+            }
+            
+            setErrorMessage(errorMessage);
+            setDebugInfo(prev => ({
+              ...prev,
+              pipModeError: errorMessage
+            }));
+            throw new Error('Failed to set up Picture-in-Picture mode: ' + errorMessage);
           }
           break;
           
         default: // webcam
-          // Determine if we need to use the AI processed stream
-          const useAIProcessing = Object.values(features).some(f => f.enabled);
-          
-          if (useAIProcessing && isModelsLoaded) {
-            // Create a canvas for AI processing
-            const processingCanvas = document.createElement('canvas');
-            
-            // Get the regular webcam stream for audio
-            const regularStream = await navigator.mediaDevices.getUserMedia({ 
-              video: videoConstraints,
-              audio: audioConstraints
-            });
-            
-            // Set canvas dimensions
-            if (videoRef.current) {
-              processingCanvas.width = videoRef.current.videoWidth;
-              processingCanvas.height = videoRef.current.videoHeight;
-            } else {
-              processingCanvas.width = 1280;
-              processingCanvas.height = 720;
-            }
-            
-            // Create a stream from the processing canvas
-            const canvasStream = processingCanvas.captureStream(30); // 30 FPS
-            
-            // Combine canvas video with original audio
-            const audioTracks = regularStream.getAudioTracks();
-            const videoTracks = canvasStream.getVideoTracks();
-            
-            stream = new MediaStream([
-              ...videoTracks,
-              ...audioTracks
-            ]);
-            
-            // Store regular stream for preview
-            streamRef.current = regularStream;
-            
-            // Set up a processing loop to apply AI effects to each frame
-            const processFrames = async () => {
-              if (!videoRef.current) return;
-              
-              await processFrame(videoRef.current, processingCanvas);
-              requestAnimationFrame(processFrames);
-            };
-            
-            processFrames();
-          } else {
-            // Standard webcam recording without AI
+          try {
             stream = await navigator.mediaDevices.getUserMedia({ 
               video: videoConstraints,
               audio: audioConstraints
             });
-            streamRef.current = stream;
+            
+            setDebugInfo(prev => ({
+              ...prev,
+              webcamStreamActive: true,
+              webcamTracks: stream.getTracks().map(track => ({
+                kind: track.kind,
+                label: track.label,
+                enabled: track.enabled
+              }))
+            }));
+            
+            return stream;
+          } catch (err) {
+            let errorMessage = 'Webcam recording error';
+            if (err instanceof DOMException) {
+              switch(err.name) {
+                case 'NotAllowedError':
+                  errorMessage = 'Camera or microphone permission denied';
+                  break;
+                case 'NotFoundError':
+                  errorMessage = 'No camera or microphone found';
+                  break;
+                case 'NotReadableError':
+                  errorMessage = 'Camera or microphone is already in use';
+                  break;
+                default:
+                  errorMessage = `Webcam error: ${err.name}`;
+              }
+            }
+            
+            setErrorMessage(errorMessage);
+            setDebugInfo(prev => ({
+              ...prev,
+              webcamError: errorMessage
+            }));
+            throw err;
           }
-          break;
       }
+
+      return stream;
+    } catch (err) {
+      setDebugInfo(prev => ({
+        ...prev,
+        streamAcquisitionError: err instanceof Error ? err.message : String(err)
+      }));
+      throw err;
+    }
+  };
+
+  const startRecording = async () => {
+    // Reset error states
+    setErrorMessage(null);
+    setIsProcessing(true);
+    chunksRef.current = [];
+    setRecordingTime(0);
+    
+    try {
+      // Check MediaRecorder support
+      const supportedMimeType = checkMediaRecorderSupport();
+      if (!supportedMimeType) {
+        setIsProcessing(false);
+        return;
+      }
+
+      // Get media stream with enhanced error handling
+      const stream = await getMediaStreamWithErrorHandling(recordingMode);
+      streamRef.current = stream;
 
       // Set up video preview
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         videoRef.current.muted = true; // Mute to prevent feedback
-        videoRef.current.play();
+        videoRef.current.play().catch(err => {
+          console.warn("Video preview play failed:", err);
+          setDebugInfo(prev => ({
+            ...prev,
+            videoPlayError: err.message
+          }));
+        });
       }
 
-      // Set up media recorder with options for better quality
-      const options = { 
-        mimeType: 'video/webm;codecs=vp9,opus',
-        videoBitsPerSecond: 2500000, // 2.5 Mbps
-        audioBitsPerSecond: 128000 // 128 kbps
-      };
-      
+      // Set up media recorder with supported options
       try {
-        const mediaRecorder = new MediaRecorder(stream, options);
-        mediaRecorderRef.current = mediaRecorder;
+        const options = { 
+          mimeType: supportedMimeType as string
+        };
+        
+        mediaRecorderRef.current = new MediaRecorder(stream, options);
+        
+        setDebugInfo(prev => ({
+          ...prev,
+          mediaRecorderCreated: true,
+          mediaRecorderMimeType: mediaRecorderRef.current.mimeType
+        }));
       } catch (e) {
-        // Fallback if vp9 is not supported
-        console.log('VP9 not supported, falling back to default codec');
-        const mediaRecorder = new MediaRecorder(stream);
-        mediaRecorderRef.current = mediaRecorder;
+        console.warn('MediaRecorder with specified options failed:', e);
+        setDebugInfo(prev => ({
+          ...prev,
+          mediaRecorderInitError: e instanceof Error ? e.message : String(e)
+        }));
+        
+        // Fallback to default settings
+        try {
+          mediaRecorderRef.current = new MediaRecorder(stream);
+          setDebugInfo(prev => ({
+            ...prev, 
+            mediaRecorderFallback: true,
+            mediaRecorderFallbackMimeType: mediaRecorderRef.current.mimeType
+          }));
+        } catch (fallbackError) {
+          console.error('MediaRecorder creation failed with fallback settings:', fallbackError);
+          setErrorMessage('Your browser cannot create a MediaRecorder with the available settings');
+          setDebugInfo(prev => ({
+            ...prev,
+            mediaRecorderFallbackError: fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+          }));
+          throw fallbackError;
+        }
       }
+
+      // Add error event listener
+      mediaRecorderRef.current.onerror = (event) => {
+        console.error('MediaRecorder error:', event);
+        const error = event.error;
+        setErrorMessage(`Recording error: ${error?.name || 'Unknown error'}`);
+        setDebugInfo(prev => ({
+          ...prev,
+          mediaRecorderError: error?.message || 'Unknown error'
+        }));
+      };
 
       // Set up data handler
       mediaRecorderRef.current.ondataavailable = (e) => {
         if (e.data.size > 0) {
           chunksRef.current.push(e.data);
+          setDebugInfo(prev => ({
+            ...prev,
+            chunksReceived: (prev.chunksReceived || 0) + 1,
+            lastChunkSize: e.data.size
+          }));
         }
       };
 
@@ -397,6 +598,14 @@ export const VideoRecorder: React.FC = () => {
         const mimeType = mediaRecorderRef.current?.mimeType || 'video/webm';
         const blob = new Blob(chunksRef.current, { type: mimeType });
         setRecordedBlob(blob);
+        
+        setDebugInfo(prev => ({
+          ...prev,
+          recordingCompleted: true,
+          finalBlobSize: blob.size,
+          finalBlobType: blob.type,
+          chunksCount: chunksRef.current.length
+        }));
         
         // Clean up recording resources
         if (timerIntervalRef.current) {
@@ -425,7 +634,19 @@ export const VideoRecorder: React.FC = () => {
       
     } catch (err) {
       console.error('Error starting recording:', err);
-      alert(`Failed to start recording: ${err.message}`);
+      
+      let errorMsg = 'Failed to start recording';
+      if (err instanceof Error) {
+        errorMsg = `Failed to start recording: ${err.message}`;
+      } else if (err instanceof DOMException) {
+        errorMsg = `Failed to start recording: ${err.name} - ${err.message}`;
+      }
+      
+      setErrorMessage(errorMsg);
+      setDebugInfo(prev => ({
+        ...prev,
+        startRecordingError: err instanceof Error ? err.message : String(err)
+      }));
     } finally {
       setIsProcessing(false);
     }
@@ -433,7 +654,19 @@ export const VideoRecorder: React.FC = () => {
 
   const stopRecording = () => {
     if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
+      try {
+        mediaRecorderRef.current.stop();
+        setDebugInfo(prev => ({
+          ...prev,
+          recordingStopped: true
+        }));
+      } catch (error) {
+        console.error("Error stopping recording:", error);
+        setDebugInfo(prev => ({
+          ...prev,
+          stopRecordingError: error instanceof Error ? error.message : String(error)
+        }));
+      }
       setIsRecording(false);
       setIsPaused(false);
     }
@@ -441,7 +674,19 @@ export const VideoRecorder: React.FC = () => {
 
   const pauseRecording = () => {
     if (mediaRecorderRef.current && isRecording && !isPaused) {
-      mediaRecorderRef.current.pause();
+      try {
+        mediaRecorderRef.current.pause();
+        setDebugInfo(prev => ({
+          ...prev,
+          recordingPaused: true
+        }));
+      } catch (error) {
+        console.error("Error pausing recording:", error);
+        setDebugInfo(prev => ({
+          ...prev,
+          pauseRecordingError: error instanceof Error ? error.message : String(error)
+        }));
+      }
       setIsPaused(true);
       
       // Pause timer
@@ -454,7 +699,19 @@ export const VideoRecorder: React.FC = () => {
 
   const resumeRecording = () => {
     if (mediaRecorderRef.current && isRecording && isPaused) {
-      mediaRecorderRef.current.resume();
+      try {
+        mediaRecorderRef.current.resume();
+        setDebugInfo(prev => ({
+          ...prev,
+          recordingResumed: true
+        }));
+      } catch (error) {
+        console.error("Error resuming recording:", error);
+        setDebugInfo(prev => ({
+          ...prev,
+          resumeRecordingError: error instanceof Error ? error.message : String(error)
+        }));
+      }
       setIsPaused(false);
       
       // Resume timer
@@ -542,6 +799,58 @@ export const VideoRecorder: React.FC = () => {
           </Tooltip>
         </div>
       </div>
+
+      {/* Error Message Display */}
+      {errorMessage && (
+        <div className="mb-4 p-3 bg-red-100 text-red-800 rounded-lg flex items-start">
+          <AlertCircle className="w-5 h-5 mr-2 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="font-medium">{errorMessage}</p>
+            <button 
+              className="text-sm text-red-700 underline mt-1"
+              onClick={() => setShowDebugInfo(!showDebugInfo)}
+            >
+              {showDebugInfo ? 'Hide debugging info' : 'Show debugging info'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Debug Info Panel */}
+      {showDebugInfo && (
+        <div className="mb-4 p-3 bg-gray-100 rounded-lg text-xs font-mono overflow-x-auto">
+          <h4 className="font-medium text-sm mb-2">Debug Information</h4>
+          <pre>{JSON.stringify(debugInfo, null, 2)}</pre>
+          
+          <div className="mt-3 pt-3 border-t border-gray-300 flex space-x-3">
+            <button
+              onClick={() => setDisableAIProcessing(!disableAIProcessing)}
+              className={`px-3 py-1.5 text-sm rounded ${
+                disableAIProcessing ? 'bg-green-600 text-white' : 'bg-gray-200'
+              }`}
+            >
+              {disableAIProcessing ? 'AI Processing Disabled' : 'Disable AI Processing'}
+            </button>
+            
+            <button
+              onClick={() => {
+                // Clear error states and debug info
+                setErrorMessage(null);
+                setDebugInfo({});
+                setShowDebugInfo(false);
+                
+                // Try to reload devices
+                navigator.mediaDevices.enumerateDevices().then(devices => {
+                  console.log('Devices refreshed:', devices.length);
+                });
+              }}
+              className="px-3 py-1.5 text-sm rounded bg-blue-600 text-white"
+            >
+              Reset & Retry
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="relative aspect-video bg-gray-900 rounded-lg overflow-hidden mb-4">
         <video
@@ -676,24 +985,30 @@ export const VideoRecorder: React.FC = () => {
                   >
                     <div className="p-2">
                       <h4 className="text-sm font-medium px-2 py-1">Select Camera</h4>
-                      <div className="space-y-1 max-h-48 overflow-y-auto">
-                        {videoDevices.map((device) => (
-                          <button
-                            key={device.deviceId}
-                            onClick={() => {
-                              setSelectedCameraId(device.deviceId);
-                              setShowVideoMenu(false);
-                            }}
-                            className={`w-full px-2 py-1.5 text-sm text-left rounded ${
-                              selectedCameraId === device.deviceId
-                                ? 'bg-[#E44E51]/10 text-[#E44E51]'
-                                : 'hover:bg-gray-100'
-                            }`}
-                          >
-                            {device.label}
-                          </button>
-                        ))}
-                      </div>
+                      {videoDevices.length === 0 ? (
+                        <div className="px-2 py-1.5 text-sm text-red-500">
+                          No cameras detected. Please check your device connections.
+                        </div>
+                      ) : (
+                        <div className="space-y-1 max-h-48 overflow-y-auto">
+                          {videoDevices.map((device) => (
+                            <button
+                              key={device.deviceId}
+                              onClick={() => {
+                                setSelectedCameraId(device.deviceId);
+                                setShowVideoMenu(false);
+                              }}
+                              className={`w-full px-2 py-1.5 text-sm text-left rounded ${
+                                selectedCameraId === device.deviceId
+                                  ? 'bg-[#E44E51]/10 text-[#E44E51]'
+                                  : 'hover:bg-gray-100'
+                              }`}
+                            >
+                              {device.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </motion.div>
                 )}
@@ -724,24 +1039,30 @@ export const VideoRecorder: React.FC = () => {
                   >
                     <div className="p-2">
                       <h4 className="text-sm font-medium px-2 py-1">Select Microphone</h4>
-                      <div className="space-y-1 max-h-48 overflow-y-auto">
-                        {audioDevices.map((device) => (
-                          <button
-                            key={device.deviceId}
-                            onClick={() => {
-                              setSelectedMicId(device.deviceId);
-                              setShowMicMenu(false);
-                            }}
-                            className={`w-full px-2 py-1.5 text-sm text-left rounded ${
-                              selectedMicId === device.deviceId
-                                ? 'bg-[#E44E51]/10 text-[#E44E51]'
-                                : 'hover:bg-gray-100'
-                            }`}
-                          >
-                            {device.label}
-                          </button>
-                        ))}
-                      </div>
+                      {audioDevices.length === 0 ? (
+                        <div className="px-2 py-1.5 text-sm text-red-500">
+                          No microphones detected. Please check your device connections.
+                        </div>
+                      ) : (
+                        <div className="space-y-1 max-h-48 overflow-y-auto">
+                          {audioDevices.map((device) => (
+                            <button
+                              key={device.deviceId}
+                              onClick={() => {
+                                setSelectedMicId(device.deviceId);
+                                setShowMicMenu(false);
+                              }}
+                              className={`w-full px-2 py-1.5 text-sm text-left rounded ${
+                                selectedMicId === device.deviceId
+                                  ? 'bg-[#E44E51]/10 text-[#E44E51]'
+                                  : 'hover:bg-gray-100'
+                              }`}
+                            >
+                              {device.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                       
                       <div className="border-t mt-2 pt-2">
                         <div className="flex items-center justify-between px-2 py-1">
