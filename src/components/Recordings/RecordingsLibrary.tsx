@@ -1,27 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Video, Search, Filter, Clock, Calendar, Trash2, Edit2, Download, 
   Play, Grid, List, ChevronDown, MoreHorizontal, Star, StarOff, 
   Copy, Share2, Folder, Plus, Film, ArrowUp, ArrowDown, Eye, Settings,
-  X, ArrowLeft, ArrowRight
+  X, ArrowLeft, ArrowRight, Loader
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Tooltip } from '../ui/Tooltip';
-
-interface Recording {
-  id: string;
-  title: string;
-  thumbnail: string;
-  duration: number;
-  size: number; // in bytes
-  resolution: string;
-  date: Date;
-  format: string;
-  favorite: boolean;
-  tags: string[];
-  folder: string | null;
-  url: string; // URL to the recording
-}
+import { getRecordings, updateRecording, deleteRecording, getFolders, Recording } from '../../utils/supabaseClient';
 
 interface RecordingsLibraryProps {
   onBackToRecorder: () => void;
@@ -45,130 +31,32 @@ const RecordingsLibrary: React.FC<RecordingsLibraryProps> = ({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
   const [showFolderMenu, setShowFolderMenu] = useState(false);
-  const [folders, setFolders] = useState<string[]>(['Projects', 'Tutorials', 'Personal']);
+  const [folders, setFolders] = useState<string[]>([]);
   const [selectedFormat, setSelectedFormat] = useState<string | null>(null);
   const [page, setPage] = useState(1);
+  const [isLoading, setIsLoading] = useState(true);
   const recordingsPerPage = 6;
   
-  // Mock data for demonstration
+  // Fetch recordings from database
   useEffect(() => {
-    const mockRecordings: Recording[] = [
-      {
-        id: '1',
-        title: 'Tutorial on AI Recording Features',
-        thumbnail: 'https://images.pexels.com/photos/3861969/pexels-photo-3861969.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1',
-        duration: 285, // 4:45
-        size: 24500000, // 24.5 MB
-        resolution: '1920x1080',
-        date: new Date('2024-05-10T14:30:00'),
-        format: 'mp4',
-        favorite: true,
-        tags: ['tutorial', 'ai', 'features'],
-        folder: 'Tutorials',
-        url: '#'
-      },
-      {
-        id: '2',
-        title: 'Screen Recording - Project Demo',
-        thumbnail: 'https://images.pexels.com/photos/577585/pexels-photo-577585.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1',
-        duration: 540, // 9:00
-        size: 52000000, // 52 MB
-        resolution: '3840x2160',
-        date: new Date('2024-05-08T10:15:00'),
-        format: 'webm',
-        favorite: false,
-        tags: ['project', 'demo', 'client'],
-        folder: 'Projects',
-        url: '#'
-      },
-      {
-        id: '3',
-        title: 'Background Removal Demo',
-        thumbnail: 'https://images.pexels.com/photos/7048022/pexels-photo-7048022.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1',
-        duration: 180, // 3:00
-        size: 15000000, // 15 MB
-        resolution: '1920x1080',
-        date: new Date('2024-05-05T16:45:00'),
-        format: 'mp4',
-        favorite: true,
-        tags: ['background', 'ai', 'effects'],
-        folder: 'Tutorials',
-        url: '#'
-      },
-      {
-        id: '4',
-        title: 'Team Meeting',
-        thumbnail: 'https://images.pexels.com/photos/7651922/pexels-photo-7651922.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1',
-        duration: 1800, // 30:00
-        size: 75000000, // 75 MB
-        resolution: '1280x720',
-        date: new Date('2024-05-02T09:30:00'),
-        format: 'mp4',
-        favorite: false,
-        tags: ['meeting', 'team'],
-        folder: null,
-        url: '#'
-      },
-      {
-        id: '5',
-        title: 'PiP Mode Demonstration',
-        thumbnail: 'https://images.pexels.com/photos/8430328/pexels-photo-8430328.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1',
-        duration: 420, // 7:00
-        size: 38000000, // 38 MB
-        resolution: '1920x1080',
-        date: new Date('2024-05-01T13:20:00'),
-        format: 'webm',
-        favorite: false,
-        tags: ['pip', 'feature', 'demo'],
-        folder: 'Personal',
-        url: '#'
-      },
-      {
-        id: '6',
-        title: 'Product Tutorial',
-        thumbnail: 'https://images.pexels.com/photos/5082562/pexels-photo-5082562.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1',
-        duration: 720, // 12:00
-        size: 45000000, // 45 MB
-        resolution: '1920x1080',
-        date: new Date('2024-04-28T11:10:00'),
-        format: 'mp4',
-        favorite: true,
-        tags: ['product', 'tutorial'],
-        folder: 'Projects',
-        url: '#'
-      },
-      {
-        id: '7',
-        title: 'Face Detection Test',
-        thumbnail: 'https://images.pexels.com/photos/5384445/pexels-photo-5384445.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1',
-        duration: 145, // 2:25
-        size: 12000000, // 12 MB
-        resolution: '1280x720',
-        date: new Date('2024-04-25T15:40:00'),
-        format: 'mp4',
-        favorite: false,
-        tags: ['ai', 'face-detection', 'test'],
-        folder: 'Tutorials',
-        url: '#'
-      },
-      {
-        id: '8',
-        title: 'Marketing Video Draft',
-        thumbnail: 'https://images.pexels.com/photos/1181316/pexels-photo-1181316.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1',
-        duration: 510, // 8:30
-        size: 48000000, // 48 MB
-        resolution: '1920x1080',
-        date: new Date('2024-04-22T09:15:00'),
-        format: 'mp4',
-        favorite: true,
-        tags: ['marketing', 'draft'],
-        folder: 'Projects',
-        url: '#'
+    const fetchData = async () => {
+      setIsLoading(true);
+      try {
+        // Fetch recordings
+        const recordingsData = await getRecordings();
+        setRecordings(recordingsData);
+        
+        // Fetch folders
+        const foldersData = await getFolders();
+        setFolders(foldersData);
+      } catch (error) {
+        console.error('Error fetching data:', error);
+      } finally {
+        setIsLoading(false);
       }
-    ];
+    };
 
-    setRecordings(mockRecordings);
-    setFilteredRecordings(mockRecordings);
+    fetchData();
   }, []);
 
   // Filter recordings based on search, folder, and format
@@ -200,16 +88,16 @@ const RecordingsLibrary: React.FC<RecordingsLibraryProps> = ({
       
       switch (sortBy) {
         case 'date':
-          comparison = a.date.getTime() - b.date.getTime();
+          comparison = new Date(a.created_at || '').getTime() - new Date(b.created_at || '').getTime();
           break;
         case 'title':
           comparison = a.title.localeCompare(b.title);
           break;
         case 'duration':
-          comparison = a.duration - b.duration;
+          comparison = (a.duration || 0) - (b.duration || 0);
           break;
         case 'size':
-          comparison = a.size - b.size;
+          comparison = (a.size || 0) - (b.size || 0);
           break;
       }
       
@@ -227,29 +115,49 @@ const RecordingsLibrary: React.FC<RecordingsLibraryProps> = ({
 
   const pageCount = Math.ceil(filteredRecordings.length / recordingsPerPage);
 
-  const toggleFavorite = (id: string) => {
-    setRecordings(recordings.map(rec => 
-      rec.id === id ? { ...rec, favorite: !rec.favorite } : rec
-    ));
+  const toggleFavorite = async (id: string) => {
+    // Find the recording
+    const recording = recordings.find(rec => rec.id === id);
+    if (!recording) return;
+
+    // Toggle favorite status
+    const success = await updateRecording(id, { favorite: !recording.favorite });
+    
+    if (success) {
+      // Update local state
+      setRecordings(recordings.map(rec => 
+        rec.id === id ? { ...rec, favorite: !rec.favorite } : rec
+      ));
+    }
   };
 
-  const deleteRecording = (id: string) => {
+  const deleteRecordingHandler = async (id: string) => {
     if (window.confirm('Are you sure you want to delete this recording?')) {
-      setRecordings(recordings.filter(rec => rec.id !== id));
-      if (selectedRecording === id) {
-        setSelectedRecording(null);
-      }
-      if (playingRecording === id) {
-        setPlayingRecording(null);
-        setPreviewUrl(null);
+      const success = await deleteRecording(id);
+      
+      if (success) {
+        // Update local state
+        setRecordings(recordings.filter(rec => rec.id !== id));
+        if (selectedRecording === id) {
+          setSelectedRecording(null);
+        }
+        if (playingRecording === id) {
+          setPlayingRecording(null);
+          setPreviewUrl(null);
+        }
       }
     }
   };
 
-  const assignToFolder = (id: string, folder: string | null) => {
-    setRecordings(recordings.map(rec => 
-      rec.id === id ? { ...rec, folder } : rec
-    ));
+  const assignToFolder = async (id: string, folder: string | null) => {
+    const success = await updateRecording(id, { folder });
+    
+    if (success) {
+      // Update local state
+      setRecordings(recordings.map(rec => 
+        rec.id === id ? { ...rec, folder } : rec
+      ));
+    }
   };
 
   const toggleSort = (sort: 'date' | 'title' | 'duration' | 'size') => {
@@ -262,7 +170,9 @@ const RecordingsLibrary: React.FC<RecordingsLibraryProps> = ({
     setShowSortMenu(false);
   };
 
-  const formatDuration = (seconds: number): string => {
+  const formatDuration = (seconds: number | null): string => {
+    if (seconds === null) return '00:00';
+    
     const hrs = Math.floor(seconds / 3600);
     const mins = Math.floor((seconds % 3600) / 60);
     const secs = Math.floor(seconds % 60);
@@ -274,15 +184,19 @@ const RecordingsLibrary: React.FC<RecordingsLibraryProps> = ({
     }
   };
 
-  const formatSize = (bytes: number): string => {
+  const formatSize = (bytes: number | null): string => {
+    if (bytes === null) return '0 B';
+    
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
     return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
   };
 
-  const formatDate = (date: Date): string => {
-    return date.toLocaleDateString('en-US', { 
+  const formatDate = (date: string | null): string => {
+    if (!date) return '';
+    
+    return new Date(date).toLocaleDateString('en-US', { 
       year: 'numeric', 
       month: 'short', 
       day: 'numeric' 
@@ -297,20 +211,26 @@ const RecordingsLibrary: React.FC<RecordingsLibraryProps> = ({
     }
   };
 
-  const addNewFolder = () => {
+  const addNewFolder = async () => {
     const folderName = prompt('Enter new folder name:');
-    if (folderName && !folders.includes(folderName)) {
-      setFolders([...folders, folderName]);
-    }
+    if (!folderName || folders.includes(folderName)) return;
+    
+    // We don't need to create a folder in the database, just add a recording to it
+    setFolders([...folders, folderName]);
   };
 
   const exportSelected = () => {
     if (!selectedRecording) return;
     
     const recording = recordings.find(rec => rec.id === selectedRecording);
-    if (recording) {
-      // In a real application, this would trigger a download
-      alert(`Exporting ${recording.title}`);
+    if (recording && recording.url) {
+      // Create a download link
+      const a = document.createElement('a');
+      a.href = recording.url;
+      a.download = `${recording.title}.${recording.format || 'mp4'}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
     }
   };
 
@@ -400,6 +320,11 @@ const RecordingsLibrary: React.FC<RecordingsLibraryProps> = ({
                       <div className="p-2 font-medium text-sm">Show Only</div>
                       <div className="space-y-1">
                         <button
+                          onClick={() => {
+                            // Filter to show only favorites
+                            const filtered = recordings.filter(rec => rec.favorite);
+                            setFilteredRecordings(filtered);
+                          }}
                           className="w-full text-left px-3 py-1.5 rounded text-sm hover:bg-gray-100 flex items-center"
                         >
                           <Star className="w-4 h-4 mr-2 text-yellow-500" />
@@ -564,168 +489,178 @@ const RecordingsLibrary: React.FC<RecordingsLibraryProps> = ({
         </div>
       )}
 
+      {/* Loading indicator */}
+      {isLoading && (
+        <div className="flex justify-center items-center py-12">
+          <Loader className="w-8 h-8 text-[#E44E51] animate-spin" />
+          <span className="ml-2 text-gray-600">Loading recordings...</span>
+        </div>
+      )}
+
       {/* Recordings List/Grid */}
-      <div className={`${viewMode === 'grid' ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6' : 'space-y-4'}`}>
-        {paginatedRecordings.length > 0 ? (
-          paginatedRecordings.map(recording => (
-            <div 
-              key={recording.id} 
-              className={`bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden ${
-                viewMode === 'grid' ? '' : 'flex'
-              } ${selectedRecording === recording.id ? 'ring-2 ring-[#E44E51]' : ''}`}
-              onClick={() => setSelectedRecording(recording.id === selectedRecording ? null : recording.id)}
-            >
-              {/* Thumbnail/Preview */}
-              <div className={`relative ${viewMode === 'grid' ? 'aspect-video' : 'w-48 h-32'}`}>
-                <img 
-                  src={recording.thumbnail} 
-                  alt={recording.title}
-                  className="w-full h-full object-cover"
-                />
-                
-                <div className="absolute inset-0 bg-black bg-opacity-0 hover:bg-opacity-50 transition-opacity flex items-center justify-center">
-                  <button 
-                    className="p-2 bg-white rounded-full opacity-0 hover:opacity-100 transform scale-90 hover:scale-100 transition-all"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      playRecording(recording.id);
-                    }}
-                  >
-                    <Play className="w-5 h-5 text-gray-900" />
-                  </button>
-                </div>
-                
-                {/* Duration badge */}
-                <div className="absolute bottom-2 right-2 bg-black/70 text-white px-1.5 py-0.5 rounded text-xs">
-                  {formatDuration(recording.duration)}
-                </div>
-                
-                {/* Resolution badge */}
-                <div className="absolute bottom-2 left-2 bg-black/70 text-white px-1.5 py-0.5 rounded text-xs">
-                  {recording.resolution}
-                </div>
-              </div>
-              
-              <div className={`p-4 ${viewMode === 'grid' ? '' : 'flex-1'}`}>
-                <div className={`flex justify-between items-start ${viewMode === 'grid' ? '' : 'mb-2'}`}>
-                  <h3 className={`font-semibold text-gray-900 ${viewMode === 'grid' ? 'text-lg mb-1' : 'text-xl'}`}>
-                    {recording.title}
-                  </h3>
+      {!isLoading && (
+        <div className={`${viewMode === 'grid' ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6' : 'space-y-4'}`}>
+          {paginatedRecordings.length > 0 ? (
+            paginatedRecordings.map(recording => (
+              <div 
+                key={recording.id} 
+                className={`bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden ${
+                  viewMode === 'grid' ? '' : 'flex'
+                } ${selectedRecording === recording.id ? 'ring-2 ring-[#E44E51]' : ''}`}
+                onClick={() => setSelectedRecording(recording.id === selectedRecording ? null : recording.id)}
+              >
+                {/* Thumbnail/Preview */}
+                <div className={`relative ${viewMode === 'grid' ? 'aspect-video' : 'w-48 h-32'}`}>
+                  <img 
+                    src={recording.thumbnail || 'https://images.pexels.com/photos/3861969/pexels-photo-3861969.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1'} 
+                    alt={recording.title}
+                    className="w-full h-full object-cover"
+                  />
                   
-                  <div className="flex">
+                  <div className="absolute inset-0 bg-black bg-opacity-0 hover:bg-opacity-50 transition-opacity flex items-center justify-center">
                     <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleFavorite(recording.id);
-                      }}
-                      className={`p-1 rounded-full ${recording.favorite ? 'text-yellow-500' : 'text-gray-400 hover:text-gray-600'}`}
-                    >
-                      {recording.favorite ? <Star className="w-5 h-5" /> : <StarOff className="w-5 h-5" />}
-                    </button>
-                    
-                    <div className="relative ml-1">
-                      <Tooltip content="More options">
-                        <button 
-                          className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            // Show options menu logic would go here
-                          }}
-                        >
-                          <MoreHorizontal className="w-5 h-5" />
-                        </button>
-                      </Tooltip>
-                    </div>
-                  </div>
-                </div>
-                
-                {/* Recording details */}
-                <div className="flex flex-wrap gap-y-1 text-sm text-gray-500">
-                  <div className="flex items-center mr-4">
-                    <Calendar className="w-4 h-4 mr-1" />
-                    <span>{formatDate(recording.date)}</span>
-                  </div>
-                  
-                  <div className="flex items-center mr-4">
-                    <Film className="w-4 h-4 mr-1" />
-                    <span>{recording.format.toUpperCase()}</span>
-                  </div>
-                  
-                  <div className="flex items-center">
-                    <Folder className="w-4 h-4 mr-1" />
-                    <span>{recording.folder || 'Uncategorized'}</span>
-                  </div>
-                  
-                  {viewMode === 'list' && (
-                    <div className="flex items-center ml-4">
-                      <Download className="w-4 h-4 mr-1" />
-                      <span>{formatSize(recording.size)}</span>
-                    </div>
-                  )}
-                </div>
-                
-                {/* Tags */}
-                {recording.tags.length > 0 && (
-                  <div className={`flex flex-wrap gap-1 ${viewMode === 'grid' ? 'mt-2' : 'mt-3'}`}>
-                    {recording.tags.map(tag => (
-                      <span 
-                        key={tag} 
-                        className="px-2 py-1 bg-gray-100 text-gray-700 rounded-full text-xs"
-                      >
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                )}
-                
-                {/* Actions for list view */}
-                {viewMode === 'list' && (
-                  <div className="mt-4 flex space-x-2">
-                    <button 
-                      className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm flex items-center"
+                      className="p-2 bg-white rounded-full opacity-0 hover:opacity-100 transform scale-90 hover:scale-100 transition-all"
                       onClick={(e) => {
                         e.stopPropagation();
                         playRecording(recording.id);
                       }}
                     >
-                      <Play className="w-4 h-4 mr-2" />
-                      Play
-                    </button>
-                    
-                    <button 
-                      className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm flex items-center"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        editRecording(recording.id);
-                      }}
-                    >
-                      <Edit2 className="w-4 h-4 mr-2" />
-                      Edit
-                    </button>
-                    
-                    <button 
-                      className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm flex items-center"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        deleteRecording(recording.id);
-                      }}
-                    >
-                      <Trash2 className="w-4 h-4 mr-2" />
-                      Delete
+                      <Play className="w-5 h-5 text-gray-900" />
                     </button>
                   </div>
-                )}
+                  
+                  {/* Duration badge */}
+                  <div className="absolute bottom-2 right-2 bg-black/70 text-white px-1.5 py-0.5 rounded text-xs">
+                    {formatDuration(recording.duration)}
+                  </div>
+                  
+                  {/* Resolution badge */}
+                  <div className="absolute bottom-2 left-2 bg-black/70 text-white px-1.5 py-0.5 rounded text-xs">
+                    {recording.resolution || 'HD'}
+                  </div>
+                </div>
+                
+                <div className={`p-4 ${viewMode === 'grid' ? '' : 'flex-1'}`}>
+                  <div className={`flex justify-between items-start ${viewMode === 'grid' ? '' : 'mb-2'}`}>
+                    <h3 className={`font-semibold text-gray-900 ${viewMode === 'grid' ? 'text-lg mb-1' : 'text-xl'}`}>
+                      {recording.title}
+                    </h3>
+                    
+                    <div className="flex">
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleFavorite(recording.id);
+                        }}
+                        className={`p-1 rounded-full ${recording.favorite ? 'text-yellow-500' : 'text-gray-400 hover:text-gray-600'}`}
+                      >
+                        {recording.favorite ? <Star className="w-5 h-5" /> : <StarOff className="w-5 h-5" />}
+                      </button>
+                      
+                      <div className="relative ml-1">
+                        <Tooltip content="More options">
+                          <button 
+                            className="p-1 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              // Show options menu logic would go here
+                            }}
+                          >
+                            <MoreHorizontal className="w-5 h-5" />
+                          </button>
+                        </Tooltip>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Recording details */}
+                  <div className="flex flex-wrap gap-y-1 text-sm text-gray-500">
+                    <div className="flex items-center mr-4">
+                      <Calendar className="w-4 h-4 mr-1" />
+                      <span>{formatDate(recording.created_at)}</span>
+                    </div>
+                    
+                    <div className="flex items-center mr-4">
+                      <Film className="w-4 h-4 mr-1" />
+                      <span>{(recording.format || 'mp4').toUpperCase()}</span>
+                    </div>
+                    
+                    <div className="flex items-center">
+                      <Folder className="w-4 h-4 mr-1" />
+                      <span>{recording.folder || 'Uncategorized'}</span>
+                    </div>
+                    
+                    {viewMode === 'list' && (
+                      <div className="flex items-center ml-4">
+                        <Download className="w-4 h-4 mr-1" />
+                        <span>{formatSize(recording.size)}</span>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Tags */}
+                  {recording.tags.length > 0 && (
+                    <div className={`flex flex-wrap gap-1 ${viewMode === 'grid' ? 'mt-2' : 'mt-3'}`}>
+                      {recording.tags.map(tag => (
+                        <span 
+                          key={tag} 
+                          className="px-2 py-1 bg-gray-100 text-gray-700 rounded-full text-xs"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  
+                  {/* Actions for list view */}
+                  {viewMode === 'list' && (
+                    <div className="mt-4 flex space-x-2">
+                      <button 
+                        className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm flex items-center"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          playRecording(recording.id);
+                        }}
+                      >
+                        <Play className="w-4 h-4 mr-2" />
+                        Play
+                      </button>
+                      
+                      <button 
+                        className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm flex items-center"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          editRecording(recording.id);
+                        }}
+                      >
+                        <Edit2 className="w-4 h-4 mr-2" />
+                        Edit
+                      </button>
+                      
+                      <button 
+                        className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm flex items-center"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteRecordingHandler(recording.id);
+                        }}
+                      >
+                        <Trash2 className="w-4 h-4 mr-2" />
+                        Delete
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
+            ))
+          ) : (
+            <div className="col-span-full py-12 text-center">
+              <Film className="w-16 h-16 mx-auto text-gray-400 mb-4" />
+              <h3 className="text-lg font-medium text-gray-900">No recordings found</h3>
+              <p className="text-gray-500 mt-1">Try changing your search or filter criteria</p>
             </div>
-          ))
-        ) : (
-          <div className="col-span-full py-12 text-center">
-            <Film className="w-16 h-16 mx-auto text-gray-400 mb-4" />
-            <h3 className="text-lg font-medium text-gray-900">No recordings found</h3>
-            <p className="text-gray-500 mt-1">Try changing your search or filter criteria</p>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
 
       {/* Pagination */}
       {pageCount > 1 && (
@@ -822,8 +757,8 @@ const RecordingsLibrary: React.FC<RecordingsLibraryProps> = ({
                   {recordings.find(r => r.id === selectedRecording)?.title}
                 </h3>
                 <div className="hidden sm:flex text-sm text-gray-500">
-                  <span className="mr-4">{formatDuration(recordings.find(r => r.id === selectedRecording)?.duration || 0)}</span>
-                  <span>{formatSize(recordings.find(r => r.id === selectedRecording)?.size || 0)}</span>
+                  <span className="mr-4">{formatDuration(recordings.find(r => r.id === selectedRecording)?.duration)}</span>
+                  <span>{formatSize(recordings.find(r => r.id === selectedRecording)?.size)}</span>
                 </div>
               </div>
               
@@ -837,7 +772,12 @@ const RecordingsLibrary: React.FC<RecordingsLibraryProps> = ({
                 </button>
                 <button 
                   className="px-4 py-2 bg-gray-100 text-gray-800 rounded-lg hover:bg-gray-200 flex items-center"
-                  onClick={() => playRecording(selectedRecording)}
+                  onClick={() => {
+                    const recording = recordings.find(r => r.id === selectedRecording);
+                    if (recording) {
+                      playRecording(selectedRecording);
+                    }
+                  }}
                 >
                   <Play className="w-4 h-4 mr-2" />
                   Play
