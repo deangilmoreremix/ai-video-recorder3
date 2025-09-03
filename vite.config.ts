@@ -4,7 +4,13 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   optimizeDeps: {
-    exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util']
+    exclude: [
+      '@ffmpeg/ffmpeg',
+      '@ffmpeg/util',
+      '@mediapipe/selfie_segmentation',
+      '@mediapipe/hands',
+      '@mediapipe/face_mesh'
+    ]
   },
   server: {
     host: true,
@@ -31,6 +37,15 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': '/src'
+    }
+  },
+  build: {
+    rollupOptions: {
+      external: [
+        '@mediapipe/selfie_segmentation',
+        '@mediapipe/hands',
+        '@mediapipe/face_mesh'
+      ]
     }
   }
 });

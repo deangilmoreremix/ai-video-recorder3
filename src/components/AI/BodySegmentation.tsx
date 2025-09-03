@@ -182,8 +182,8 @@ export const BodySegmentation: React.FC<BodySegmentationProps> = ({
             if (tempCtx) {
               tempCtx.drawImage(video, 0, 0);
               tempCtx.globalCompositeOperation = 'destination-in';
-              tempCtx.drawImage(foregroundMask, 0, 0);
-              
+              tempCtx.putImageData(foregroundMask, 0, 0);
+
               ctx.drawImage(tempCanvas, 0, 0);
             }
             
@@ -201,7 +201,7 @@ export const BodySegmentation: React.FC<BodySegmentationProps> = ({
               );
             } else {
               // Fill with background color
-              ctx.fillStyle = localSettings.backgroundColor;
+              ctx.fillStyle = localSettings.backgroundColor || '#00FF00';
               ctx.fillRect(0, 0, canvas.width, canvas.height);
             }
             
@@ -214,15 +214,15 @@ export const BodySegmentation: React.FC<BodySegmentationProps> = ({
             if (foregroundCtx) {
               foregroundCtx.drawImage(video, 0, 0);
               foregroundCtx.globalCompositeOperation = 'destination-in';
-              
+
               // Create foreground mask
               const fgMask = await bodySegmentation.toBinaryMask(
                 segmentation,
                 { r: 0, g: 0, b: 0, a: 0 },
                 { r: 0, g: 0, b: 0, a: 255 }
               );
-              
-              foregroundCtx.drawImage(fgMask, 0, 0);
+
+              foregroundCtx.putImageData(fgMask, 0, 0);
               ctx.drawImage(foregroundCanvas, 0, 0);
             }
             break;
@@ -234,14 +234,14 @@ export const BodySegmentation: React.FC<BodySegmentationProps> = ({
             // Draw outline around person
             const coloredSegmentation = await bodySegmentation.toColoredMask(
               segmentation,
-              bodySegmentation.ColoredMaskType.RAINBOW,
+              'rainbow',
               { r: 255, g: 255, b: 255, a: 255 }
             );
             
             // Apply outline effect
             ctx.globalCompositeOperation = 'source-over';
-            ctx.lineWidth = localSettings.outlineWidth;
-            ctx.strokeStyle = localSettings.foregroundColor;
+            ctx.lineWidth = localSettings.outlineWidth || 3;
+            ctx.strokeStyle = localSettings.foregroundColor || '#FFFFFF';
             
             // Get the segmentation data and trace its outline
             // This is simplified - in a real app you'd need edge detection
@@ -250,8 +250,8 @@ export const BodySegmentation: React.FC<BodySegmentationProps> = ({
               const compositeCanvas = compositeCtx.canvas;
               compositeCanvas.width = canvas.width;
               compositeCanvas.height = canvas.height;
-              
-              compositeCtx.drawImage(coloredSegmentation, 0, 0);
+
+              compositeCtx.putImageData(coloredSegmentation, 0, 0);
               
               const imageData = compositeCtx.getImageData(0, 0, canvas.width, canvas.height);
               const data = imageData.data;
@@ -285,13 +285,20 @@ export const BodySegmentation: React.FC<BodySegmentationProps> = ({
             // Create colored mask
             const mask = await bodySegmentation.toColoredMask(
               segmentation,
-              bodySegmentation.ColoredMaskType.RAINBOW,
+              (maskValue: number) => {
+                // Simple rainbow color mapping
+                const hue = (maskValue * 360) % 360;
+                return { r: Math.floor(Math.sin(hue * Math.PI / 180) * 127 + 128),
+                         g: Math.floor(Math.sin((hue + 120) * Math.PI / 180) * 127 + 128),
+                         b: Math.floor(Math.sin((hue + 240) * Math.PI / 180) * 127 + 128),
+                         a: 255 };
+              },
               { r: 255, g: 255, b: 255, a: 0 }
             );
             
             // Overlay mask with opacity
-            ctx.globalAlpha = localSettings.maskOpacity;
-            ctx.drawImage(mask, 0, 0);
+            ctx.globalAlpha = localSettings.maskOpacity || 0.7;
+            ctx.putImageData(mask, 0, 0);
             ctx.globalAlpha = 1;
             break;
         }

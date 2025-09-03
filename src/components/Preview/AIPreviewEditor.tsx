@@ -157,13 +157,40 @@ export const AIPreviewEditor: React.FC<AIPreviewEditorProps> = ({
             </button>
             <div className="flex space-x-2">
               <button
-                onClick={() => {}}
+                onClick={() => {
+                  if (navigator.share && videoUrl) {
+                    navigator.share({
+                      title: 'AI Enhanced Video',
+                      text: 'Check out this AI-enhanced video!',
+                      url: videoUrl
+                    });
+                  } else {
+                    // Fallback: copy URL to clipboard
+                    navigator.clipboard.writeText(videoUrl);
+                    alert('Video URL copied to clipboard!');
+                  }
+                }}
                 className="p-2 bg-white rounded-full hover:bg-gray-100"
               >
                 <Share2 className="w-4 h-4" />
               </button>
               <button
-                onClick={() => {}}
+                onClick={() => {
+                  if (canvasRef.current) {
+                    canvasRef.current.toBlob((blob) => {
+                      if (blob) {
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = 'ai-enhanced-frame.png';
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                      }
+                    }, 'image/png');
+                  }
+                }}
                 className="p-2 bg-white rounded-full hover:bg-gray-100"
               >
                 <Download className="w-4 h-4" />
@@ -180,9 +207,8 @@ export const AIPreviewEditor: React.FC<AIPreviewEditorProps> = ({
           AI Features
         </h4>
         <AIFeatureGrid
-          features={features}
-          onToggleFeature={toggleFeature}
-          onUpdateSettings={updateFeatureSettings}
+          enabledFeatures={features}
+          onFeatureToggle={toggleFeature}
           isProcessing={isProcessing}
         />
       </div>
