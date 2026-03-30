@@ -132,6 +132,19 @@ export const Chapters: React.FC = () => {
     return `${h ? h + ':' : ''}${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
+  // Parse time string (MM:SS or HH:MM:SS) to seconds
+  const parseTimeString = (timeStr: string): number => {
+    const parts = timeStr.split(':').map(Number);
+    if (parts.some(isNaN)) return -1;
+    
+    if (parts.length === 2) {
+      return parts[0] * 60 + parts[1];
+    } else if (parts.length === 3) {
+      return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    }
+    return -1;
+  };
+
   const autoGenerateChapters = async () => {
     // Simulated chapter generation
     const generatedChapters: Chapter[] = [
@@ -471,8 +484,15 @@ export const Chapters: React.FC = () => {
                       type="text"
                       value={formatTime(chapter.startTime)}
                       onChange={(e) => {
-                        // Add time parsing logic here
+                        const seconds = parseTimeString(e.target.value);
+                        if (seconds >= 0) {
+                          updateChapter(chapter.id, { 
+                            startTime: seconds,
+                            endTime: Math.max(seconds, chapter.endTime)
+                          });
+                        }
                       }}
+                      placeholder="0:00"
                       className="w-full rounded-lg border-gray-300 text-sm"
                     />
                   </div>
@@ -484,8 +504,12 @@ export const Chapters: React.FC = () => {
                       type="text"
                       value={formatTime(chapter.endTime)}
                       onChange={(e) => {
-                        // Add time parsing logic here
+                        const seconds = parseTimeString(e.target.value);
+                        if (seconds > chapter.startTime) {
+                          updateChapter(chapter.id, { endTime: seconds });
+                        }
                       }}
+                      placeholder="0:00"
                       className="w-full rounded-lg border-gray-300 text-sm"
                     />
                   </div>
