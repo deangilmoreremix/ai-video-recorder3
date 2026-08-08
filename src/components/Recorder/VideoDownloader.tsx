@@ -48,7 +48,7 @@ export const VideoDownloader: React.FC<VideoDownloaderProps> = ({
       const scaleFilter = size?.width ? 
         `scale=${size.width}:${size.height}:force_original_aspect_ratio=decrease,pad=${size.width}:${size.height}:(ow-iw)/2:(oh-ih)/2` : '';
 
-      let ffmpegCommand: string[] = [];
+      const ffmpegCommand: string[] = [];
 
       // Rest of the ffmpeg command generation remains the same...
 

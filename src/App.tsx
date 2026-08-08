@@ -10,14 +10,6 @@ import AnimationPage from './pages/features/AnimationPage';
 import PricingPage from './pages/PricingPage';
 import RecordingsLibraryPage from './pages/RecordingsLibraryPage';
 
-// App components
-import { VideoRecorder } from './components/Recorder/VideoRecorder';
-import { VideoPlayback } from './components/Preview/VideoPlayback';
-import { FeatureList } from './components/Features/FeatureList';
-import { AdvancedControls } from './components/Controls/AdvancedControls';
-import { WalkthroughTutorial } from './components/Tutorial/WalkthroughTutorial';
-import { FeatureAssistant } from './components/Assistant/FeatureAssistant';
-
 // App Page
 import AppMain from './pages/AppMain';
 

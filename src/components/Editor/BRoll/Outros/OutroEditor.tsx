@@ -795,7 +795,6 @@ export const OutroEditor: React.FC<OutroEditorProps> = ({ templateId, onSave }) 
                         scale: parseFloat(e.target.value)
                       }
                     })}
-                    className ```typescript
                     className="w-full accent-[#E44E51]"
                   />
                 </div>

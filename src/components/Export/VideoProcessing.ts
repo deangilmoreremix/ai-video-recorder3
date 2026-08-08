@@ -37,8 +37,8 @@ export const processVideo = async (
 
   await ffmpeg.writeFile(inputFileName, await fetchFile(blob));
 
-  let filters: string[] = [];
-  let args: string[] = ['-i', inputFileName];
+  const filters: string[] = [];
+  const args: string[] = ['-i', inputFileName];
 
   // Video codec
   if (options.codec) {
