@@ -703,8 +703,27 @@ const RecordingsLibrary: React.FC<RecordingsLibraryProps> = ({
           ) : (
             <div className="col-span-full py-12 text-center">
               <Film className="w-16 h-16 mx-auto text-gray-400 mb-4" />
-              <h3 className="text-lg font-medium text-gray-900">No recordings found</h3>
-              <p className="text-gray-500 mt-1">Try changing your search or filter criteria</p>
+              {recordings.length === 0 ? (
+                <>
+                  <h3 className="text-lg font-medium text-gray-900">No recordings yet</h3>
+                  <p className="text-gray-500 mt-1">
+                    Your recordings will appear here as soon as you make one.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={onBackToRecorder}
+                    className="mt-4 inline-flex items-center px-4 py-2 bg-[#E44E51] text-white rounded-lg hover:bg-[#D43B3E] shadow-sm"
+                  >
+                    <Plus className="w-4 h-4 mr-2" />
+                    Create your first recording
+                  </button>
+                </>
+              ) : (
+                <>
+                  <h3 className="text-lg font-medium text-gray-900">No recordings found</h3>
+                  <p className="text-gray-500 mt-1">Try changing your search or filter criteria</p>
+                </>
+              )}
             </div>
           )}
         </div>

@@ -1,7 +1,8 @@
-import React, { useState, useCallback } from 'react';
-import { Settings, RotateCcw, Music, Clock, Mic, MessageCircle, Scissors, Plus, X } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Settings, RotateCcw, Music, Clock, Mic, MessageCircle, Scissors, Plus, X, AlertCircle, Loader, Check } from 'lucide-react';
 import { Tooltip } from '../ui/Tooltip';
 import { motion, AnimatePresence } from 'framer-motion';
+import { decodeAudio, computeEnergy, type SilentSegment } from './audioAnalysis';
 
 interface AdvancedSilentRemovalSettings {
   algorithm: string;
@@ -28,16 +29,23 @@ interface SilentRemovalSettings {
 }
 
 interface SilentRemovalProps {
-  onProcess?: () => void;
+  videoRef?: React.RefObject<HTMLVideoElement | null>;
+  videoUrl?: string | null;
+  onProcess?: (segments: SilentSegment[]) => void;
   onSettingsChange?: (settings: SilentRemovalSettings) => void;
 }
 
 export const SilentRemoval: React.FC<SilentRemovalProps> = ({ 
+  videoRef,
+  videoUrl,
   onProcess, 
   onSettingsChange 
 }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [silentSegments, setSilentSegments] = useState<SilentSegment[]>([]);
+  const [applied, setApplied] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [settings, setSettings] = useState<SilentRemovalSettings>({
     threshold: 0.05,
@@ -110,24 +118,108 @@ export const SilentRemoval: React.FC<SilentRemovalProps> = ({
   }, []);
 
   const handleProcess = useCallback(async () => {
+    if (!videoUrl) {
+      setStatus('Load a video in the editor first, then detect its silent segments.');
+      return;
+    }
+
     setIsProcessing(true);
     setProgress(0);
+    setSilentSegments([]);
+    setApplied(false);
+    setStatus('Decoding audio and measuring energy…');
 
     try {
-      // Simulate processing with progress updates
-      for (let i = 0; i <= 100; i += 10) {
-        await new Promise(resolve => setTimeout(resolve, 200));
-        setProgress(i);
+      const buffer = await decodeAudio(videoUrl);
+      setProgress(20);
+      setStatus('Scanning RMS energy windows for silence…');
+
+      const energy = computeEnergy(buffer, 0.05);
+      const { windows, windowSize, count, duration } = energy;
+
+      // Real detection: classify each energy window against the threshold and
+      // group consecutive silent windows into segments. Progress is driven by
+      // the actual window index, not a timer.
+      const segments: SilentSegment[] = [];
+      let runStart = -1;
+      const yieldEvery = Math.max(1, Math.floor(count / 50));
+
+      for (let w = 0; w < count; w++) {
+        const isSilent = windows[w] < settings.threshold;
+        if (isSilent && runStart === -1) {
+          runStart = w;
+        } else if (!isSilent && runStart !== -1) {
+          const start = runStart * windowSize;
+          const end = w * windowSize;
+          if (end - start >= settings.minSilenceDuration) {
+            segments.push({
+              start: Math.max(0, start - settings.padding),
+              end: Math.min(duration, end + settings.padding),
+              duration: end - start
+            });
+          }
+          runStart = -1;
+        }
+
+        if (w % yieldEvery === 0) {
+          setProgress(20 + Math.floor((w / count) * 75));
+          // Yield to the event loop so the progress bar can paint.
+          await new Promise<void>(resolve => setTimeout(resolve, 0));
+        }
       }
-      
-      onProcess?.();
+
+      if (runStart !== -1) {
+        const start = runStart * windowSize;
+        if (duration - start >= settings.minSilenceDuration) {
+          segments.push({
+            start: Math.max(0, start - settings.padding),
+            end: duration,
+            duration: duration - start
+          });
+        }
+      }
+
+      setProgress(100);
+      setSilentSegments(segments);
+
+      const saved = segments.reduce((sum, s) => sum + (s.end - s.start), 0);
+      if (segments.length === 0) {
+        setStatus('No silent segments met the threshold. Try lowering the silence threshold.');
+      } else {
+        setStatus(
+          `Found ${segments.length} silent segment(s) totalling ${saved.toFixed(1)}s of silence. ` +
+          `Apply to skip them during playback.`
+        );
+      }
+
+      onProcess?.(segments);
     } catch (error) {
       console.error('Error processing silent removal:', error);
+      setStatus('Could not analyze the audio track. Make sure the video contains decodable audio.');
     } finally {
       setIsProcessing(false);
-      setProgress(0);
     }
-  }, [onProcess]);
+  }, [videoUrl, settings, onProcess]);
+
+  // When "applied", genuinely skip over detected silent regions during playback
+  // by seeking the video element past them on every time update.
+  useEffect(() => {
+    const video = videoRef?.current;
+    if (!video || !applied || silentSegments.length === 0) return;
+
+    const handler = () => {
+      const t = video.currentTime;
+      for (const seg of silentSegments) {
+        if (t >= seg.start && t < seg.end) {
+          video.currentTime = Math.min(video.duration || seg.end, seg.end + 0.02);
+          break;
+        }
+      }
+    };
+
+    video.addEventListener('timeupdate', handler);
+    return () => video.removeEventListener('timeupdate', handler);
+  }, [applied, silentSegments, videoRef]);
 
   const resetSettings = useCallback(() => {
     setSettings({
@@ -572,6 +664,54 @@ export const SilentRemoval: React.FC<SilentRemovalProps> = ({
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* Status & Results */}
+        {status && (
+          <div className="flex items-start space-x-2 p-3 rounded-lg text-sm bg-gray-50 text-gray-600">
+            {isProcessing ? (
+              <Loader className="w-4 h-4 mt-0.5 flex-shrink-0 animate-spin" />
+            ) : (
+              <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+            )}
+            <span>{status}</span>
+          </div>
+        )}
+
+        {!isProcessing && silentSegments.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-medium text-gray-700">
+                Detected silent segments
+              </h4>
+              <button
+                onClick={() => setApplied(prev => !prev)}
+                className={`flex items-center space-x-1 px-3 py-1.5 rounded-lg text-sm transition-colors ${
+                  applied
+                    ? 'bg-[#E44E51] text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                <Check className="w-4 h-4" />
+                <span>{applied ? 'Skipping applied' : 'Apply to playback'}</span>
+              </button>
+            </div>
+            <div className="max-h-40 overflow-y-auto space-y-1">
+              {silentSegments.map((seg, i) => (
+                <div
+                  key={i}
+                  className="flex items-center justify-between text-xs text-gray-600 bg-gray-50 rounded px-2 py-1"
+                >
+                  <span>
+                    {seg.start.toFixed(2)}s – {seg.end.toFixed(2)}s
+                  </span>
+                  <span className="text-gray-400">
+                    {seg.duration.toFixed(1)}s silent
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Process Button */}
         <button

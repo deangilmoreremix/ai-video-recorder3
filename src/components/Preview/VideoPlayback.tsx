@@ -312,7 +312,7 @@ export const VideoPlayback: React.FC = () => {
       {/* Video Editor */}
       {showEditor && (
         <div className="bg-white rounded-lg shadow-lg p-4">
-          <VideoEditor videoRef={videoRef} />
+          <VideoEditor videoRef={videoRef} videoUrl={videoUrl} />
         </div>
       )}
 

@@ -12,9 +12,10 @@ import { TransitionEffects } from '../Transitions/TransitionEffects';
 
 interface VideoEditorProps {
   videoRef: React.RefObject<HTMLVideoElement>;
+  videoUrl?: string | null;
 }
 
-export const VideoEditor: React.FC<VideoEditorProps> = () => {
+export const VideoEditor: React.FC<VideoEditorProps> = ({ videoRef, videoUrl }) => {
   const [activeTab, setActiveTab] = useState('timeline');
 
   const tabs = [
@@ -33,11 +34,11 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
       case 'timeline':
         return <Timeline />;
       case 'silence':
-        return <SilentRemoval />;
+        return <SilentRemoval videoRef={videoRef} videoUrl={videoUrl} />;
       case 'captions':
-        return <Captions />;
+        return <Captions videoRef={videoRef} videoUrl={videoUrl} />;
       case 'chapters':
-        return <Chapters />;
+        return <Chapters videoRef={videoRef} videoUrl={videoUrl} />;
       case 'broll':
         return <BRoll />;
       case 'effects':

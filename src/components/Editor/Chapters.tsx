@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { BookOpen, Plus, Clock, Edit2, Trash2, ChevronUp, ChevronDown, Settings, Image, Move, Save, Camera, Link, Eye, EyeOff } from 'lucide-react';
+import { BookOpen, Plus, Clock, Edit2, Trash2, ChevronUp, ChevronDown, Settings, Image, Move, Save, Camera, Link, Eye, EyeOff, AlertCircle, Loader } from 'lucide-react';
 import { Tooltip } from '../ui/Tooltip';
 import { nanoid } from 'nanoid';
+import { decodeAudio, computeEnergy, detectChapters, type DetectedChapter } from './audioAnalysis';
 
 interface Chapter {
   id: string;
@@ -24,10 +25,18 @@ interface Chapter {
   };
 }
 
-export const Chapters: React.FC = () => {
+interface ChaptersProps {
+  videoRef?: React.RefObject<HTMLVideoElement | null>;
+  videoUrl?: string | null;
+}
+
+export const Chapters: React.FC<ChaptersProps> = ({ videoRef, videoUrl }) => {
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [editingChapter, setEditingChapter] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [processing, setProcessing] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [status, setStatus] = useState<string | null>(null);
   const [settings, setSettings] = useState({
     autoGenerate: false,
     detectScenes: true,
@@ -128,56 +137,95 @@ export const Chapters: React.FC = () => {
     return `${h ? h + ':' : ''}${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  const autoGenerateChapters = async () => {
-    // Simulated chapter generation
-    const generatedChapters: Chapter[] = [
-      {
-        id: nanoid(),
-        title: 'Introduction',
-        startTime: 0,
-        endTime: 180,
-        description: 'Opening sequence',
-        isVisible: true,
-        style: {
-          titleColor: '#ffffff',
-          backgroundColor: '#000000',
-          opacity: 0.8,
-          borderRadius: 8,
-          padding: 16
-        }
-      },
-      {
-        id: nanoid(),
-        title: 'Main Content',
-        startTime: 180,
-        endTime: 480,
-        description: 'Core discussion',
-        isVisible: true,
-        style: {
-          titleColor: '#ffffff',
-          backgroundColor: '#000000',
-          opacity: 0.8,
-          borderRadius: 8,
-          padding: 16
-        }
-      },
-      {
-        id: nanoid(),
-        title: 'Conclusion',
-        startTime: 480,
-        endTime: 600,
-        description: 'Closing remarks',
-        isVisible: true,
-        style: {
-          titleColor: '#ffffff',
-          backgroundColor: '#000000',
-          opacity: 0.8,
-          borderRadius: 8,
-          padding: 16
-        }
+  const parseTime = (value: string): number | null => {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const parts = trimmed.split(':').map(p => parseFloat(p));
+    if (parts.some(n => Number.isNaN(n))) return null;
+    if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    if (parts.length === 2) return parts[0] * 60 + parts[1];
+    if (parts.length === 1) return parts[0];
+    return null;
+  };
+
+  const captureThumbnail = (id: string, at: number) => {
+    const video = videoRef?.current;
+    if (!video) return;
+    const seekAndCapture = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth || 320;
+      canvas.height = video.videoHeight || 180;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/png');
+        updateChapter(id, { thumbnail: dataUrl, customThumbnail: dataUrl });
       }
-    ];
-    setChapters(generatedChapters);
+      video.removeEventListener('seeked', seekAndCapture);
+    };
+    video.addEventListener('seeked', seekAndCapture);
+    video.currentTime = Math.max(0, Math.min(at, video.duration || at));
+  };
+
+  const uploadThumbnail = (id: string, file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      updateChapter(id, { thumbnail: reader.result as string, customThumbnail: reader.result as string });
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const autoGenerateChapters = async () => {
+    if (!videoUrl) {
+      setStatus('Load a video in the editor first, then generate chapters from its audio.');
+      return;
+    }
+
+    setProcessing(true);
+    setProgress(0);
+    setStatus('Analyzing audio to detect chapter boundaries…');
+
+    try {
+      const buffer = await decodeAudio(videoUrl);
+      setProgress(40);
+
+      const energy = computeEnergy(buffer, 0.1);
+      setProgress(70);
+
+      const detected: DetectedChapter[] = detectChapters(energy, settings.minDuration);
+      setProgress(100);
+
+      if (detected.length === 0) {
+        setStatus('No distinct audio segments were found. Try lowering the minimum duration.');
+        setChapters([]);
+        return;
+      }
+
+      const generatedChapters: Chapter[] = detected.map((chapter, index) => ({
+        id: nanoid(),
+        title: `Chapter ${index + 1}`,
+        startTime: chapter.startTime,
+        endTime: chapter.endTime,
+        description: `Average energy: ${(chapter.avgEnergy * 100).toFixed(1)}%`,
+        isVisible: true,
+        style: {
+          titleColor: '#ffffff',
+          backgroundColor: '#000000',
+          opacity: 0.8,
+          borderRadius: 8,
+          padding: 16
+        }
+      }));
+
+      setChapters(generatedChapters);
+      setStatus(`Detected ${generatedChapters.length} chapter(s) from audio energy changes.`);
+    } catch (error) {
+      console.error('Error generating chapters:', error);
+      setStatus('Could not analyze the audio track. Make sure the video contains decodable audio.');
+    } finally {
+      setProcessing(false);
+      setProgress(0);
+    }
   };
 
   const exportChapters = () => {
@@ -251,6 +299,26 @@ export const Chapters: React.FC = () => {
           </Tooltip>
         </div>
       </div>
+
+      {status && (
+        <div className="flex items-start space-x-2 p-3 rounded-lg text-sm bg-gray-50 text-gray-600">
+          {processing ? (
+            <Loader className="w-4 h-4 mt-0.5 flex-shrink-0 animate-spin" />
+          ) : (
+            <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+          )}
+          <span>{status}</span>
+        </div>
+      )}
+
+      {processing && (
+        <div className="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">
+          <div
+            className="h-full bg-[#E44E51] transition-all"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+      )}
 
       {showSettings && (
         <div className="mb-4 p-4 bg-gray-50 rounded-lg space-y-3">
@@ -466,8 +534,9 @@ export const Chapters: React.FC = () => {
                     <input
                       type="text"
                       value={formatTime(chapter.startTime)}
-                      onChange={() => {
-                        // Add time parsing logic here
+                      onChange={(e) => {
+                        const parsed = parseTime(e.target.value);
+                        if (parsed !== null) updateChapter(chapter.id, { startTime: parsed });
                       }}
                       className="w-full rounded-lg border-gray-300 text-sm"
                     />
@@ -479,8 +548,9 @@ export const Chapters: React.FC = () => {
                     <input
                       type="text"
                       value={formatTime(chapter.endTime)}
-                      onChange={() => {
-                        // Add time parsing logic here
+                      onChange={(e) => {
+                        const parsed = parseTime(e.target.value);
+                        if (parsed !== null) updateChapter(chapter.id, { endTime: parsed });
                       }}
                       className="w-full rounded-lg border-gray-300 text-sm"
                     />
@@ -493,9 +563,7 @@ export const Chapters: React.FC = () => {
                   </label>
                   <div className="flex items-center space-x-2">
                     <button
-                      onClick={() => {
-                        // Add thumbnail capture logic
-                      }}
+                      onClick={() => captureThumbnail(chapter.id, chapter.startTime)}
                       className="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 text-sm"
                     >
                       <Camera className="w-4 h-4 inline-block mr-1" />
@@ -503,7 +571,14 @@ export const Chapters: React.FC = () => {
                     </button>
                     <button
                       onClick={() => {
-                        // Add thumbnail upload logic
+                        const input = document.createElement('input');
+                        input.type = 'file';
+                        input.accept = 'image/*';
+                        input.onchange = () => {
+                          const file = input.files?.[0];
+                          if (file) uploadThumbnail(chapter.id, file);
+                        };
+                        input.click();
                       }}
                       className="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 text-sm"
                     >

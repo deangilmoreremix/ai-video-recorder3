@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Users, Settings, Mic, Wand2, Clock, Edit2, Download, Upload, Palette, Plus, Trash2, AlignLeft, AlignCenter, AlignRight } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Users, Settings, Mic, Wand2, Clock, Edit2, Download, Upload, Palette, Plus, Trash2, AlignLeft, AlignCenter, AlignRight, AlertCircle } from 'lucide-react';
 import { Tooltip } from '../ui/Tooltip';
 import { nanoid } from 'nanoid';
 
@@ -20,10 +20,51 @@ interface Caption {
   };
 }
 
-export const Captions: React.FC = () => {
+// Minimal typings for the Web Speech API (not in the standard DOM lib).
+interface SpeechRecognitionResultLike {
+  0: { transcript: string };
+  isFinal: boolean;
+}
+interface SpeechRecognitionEventLike {
+  resultIndex: number;
+  results: { length: number; [index: number]: SpeechRecognitionResultLike };
+}
+interface SpeechRecognitionErrorLike {
+  error: string;
+}
+interface SpeechRecognitionLike {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start: () => void;
+  stop: () => void;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorLike) => void) | null;
+  onend: (() => void) | null;
+}
+type SpeechRecognitionCtor = new () => SpeechRecognitionLike;
+
+function getSpeechRecognition(): SpeechRecognitionCtor | null {
+  const w = window as unknown as {
+    SpeechRecognition?: SpeechRecognitionCtor;
+    webkitSpeechRecognition?: SpeechRecognitionCtor;
+  };
+  return w.SpeechRecognition || w.webkitSpeechRecognition || null;
+}
+
+interface CaptionsProps {
+  videoRef?: React.RefObject<HTMLVideoElement | null>;
+  videoUrl?: string | null;
+}
+
+export const Captions: React.FC<CaptionsProps> = ({ videoRef, videoUrl }) => {
   const [captions, setCaptions] = useState<Caption[]>([]);
   const [selectedCaption, setSelectedCaption] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const segmentStartRef = useRef(0);
+
   const [settings, setSettings] = useState({
     autoGenerate: true,
     autoTranslate: false,
@@ -41,34 +82,91 @@ export const Captions: React.FC = () => {
 
   const [showStyleEditor, setShowStyleEditor] = useState(false);
 
-  const generateCaptions = async () => {
-    setProcessing(true);
-    try {
-      // Simulated caption generation
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      const newCaptions: Caption[] = [
-        {
-          id: nanoid(),
-          text: 'Generated caption example',
-          startTime: 0,
-          endTime: 3,
-          speaker: 'Speaker 1',
-          language: 'en',
-          style: {
-            position: 'bottom',
-            alignment: 'center',
-            fontSize: 16,
-            color: '#ffffff',
-            background: '#000000',
-            opacity: 0.8
-          }
+  useEffect(() => {
+    // Stop any in-flight recognition if the component unmounts.
+    return () => {
+      recognitionRef.current?.stop();
+      recognitionRef.current = null;
+    };
+  }, []);
+
+  const appendCaption = (text: string, start: number, end: number) => {
+    setCaptions(prev => [
+      ...prev,
+      {
+        id: nanoid(),
+        text,
+        startTime: start,
+        endTime: end,
+        language: 'en',
+        style: {
+          position: settings.style.position as 'top' | 'bottom',
+          alignment: settings.style.alignment as 'left' | 'center' | 'right',
+          fontSize: settings.style.size,
+          color: settings.style.color,
+          background: settings.style.background,
+          opacity: settings.style.opacity
         }
-      ];
-      setCaptions(newCaptions);
-    } catch (error) {
-      console.error('Error generating captions:', error);
-    } finally {
+      }
+    ]);
+  };
+
+  const generateCaptions = async () => {
+    if (!videoUrl || !videoRef) {
+      setStatus('Load a video in the editor first, then generate captions.');
+      return;
+    }
+    const SpeechRecognitionCtor = getSpeechRecognition();
+    if (!SpeechRecognitionCtor) {
+      // Speech recognition is unavailable, so we do not invent output — the
+      // user can add captions manually below.
+      setStatus('Speech recognition is not available in this browser. You can add captions manually below.');
+      return;
+    }
+
+    setProcessing(true);
+    setStatus('Listening via your microphone — play the video so its speech is captured and transcribed.');
+
+    const recognition = new SpeechRecognitionCtor();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+
+    recognition.onresult = (event) => {
+      const video = videoRef.current;
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        if (result.isFinal) {
+          const text = result[0].transcript.trim();
+          if (!text) continue;
+          const end = video ? video.currentTime : segmentStartRef.current;
+          const start = segmentStartRef.current;
+          appendCaption(text, start, end);
+          segmentStartRef.current = end;
+        }
+      }
+    };
+
+    recognition.onerror = (event) => {
+      setStatus(`Speech recognition error: ${event.error}. Check microphone permissions and try again.`);
       setProcessing(false);
+    };
+
+    recognition.onend = () => {
+      setProcessing(false);
+      setStatus(prev => (prev && prev.startsWith('Listening') ? 'Transcription complete.' : prev));
+      recognitionRef.current = null;
+    };
+
+    recognitionRef.current = recognition;
+    segmentStartRef.current = videoRef.current ? videoRef.current.currentTime : 0;
+
+    // Play the video so its audio is available to the recognizer.
+    videoRef.current?.play().catch(() => undefined);
+    try {
+      recognition.start();
+    } catch {
+      // start() throws if called while already running; ignore.
     }
   };
 
@@ -319,6 +417,17 @@ export const Captions: React.FC = () => {
                 <AlignRight className="w-4 h-4" />
               </button>
             </div>
+          </div>
+        )}
+
+        {status && (
+          <div className={`flex items-start space-x-2 p-3 rounded-lg text-sm ${
+            status.toLowerCase().includes('error')
+              ? 'border border-[#E44E51]/30 bg-[#E44E51]/10 text-[#E44E51]'
+              : 'bg-gray-50 text-gray-600'
+          }`}>
+            <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+            <span>{status}</span>
           </div>
         )}
 

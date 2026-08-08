@@ -1,8 +1,38 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Loader, Video, Youtube, Instagram, Twitter, Facebook, Linkedin, Globe, X, Folder, Tag, Plus, Save } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  AlertCircle,
+  Download,
+  Facebook,
+  Folder,
+  Globe,
+  Info,
+  Instagram,
+  Linkedin,
+  Loader,
+  Plus,
+  Save,
+  Tag,
+  Twitter,
+  Video,
+  X,
+  Youtube
+} from 'lucide-react';
 import { motion } from 'framer-motion';
 import { getFolders } from '../../utils/supabaseClient';
 import { generateThumbnail } from '../../utils/videoProcessing';
+import {
+  MAX_INPUT_BYTES,
+  downloadBlob,
+  generateGif,
+  getExtensionForBlob,
+  hasSharedArrayBuffer,
+  isCancellation,
+  isCrossOriginIsolated,
+  isFFmpegSupported,
+  processVideo,
+  toError
+} from '../Export/VideoProcessing';
+import { useExportStore } from '../../store/exportStore';
 
 interface EnhancedDownloadDialogProps {
   isOpen: boolean;
@@ -17,6 +47,110 @@ interface EnhancedDownloadDialogProps {
   onRecordingFolderChange: (folder: string | null) => void;
 }
 
+/** `original` hands the recorded file over untouched, everything else re-encodes. */
+type ExportFormat = 'original' | 'mp4' | 'webm' | 'mov' | 'gif';
+
+/** What the pipeline is doing right now – used for honest status copy. */
+type ExportStage = 'idle' | 'engine' | 'converting' | 'finishing';
+
+interface Resolution {
+  width: number;
+  height: number;
+}
+
+interface DialogSettings {
+  format: ExportFormat;
+  quality: number;
+  /** `null` keeps the source resolution (no scaling / no upscaling). */
+  resolution: Resolution | null;
+  /** `null` keeps the source frame rate. */
+  fps: number | null;
+  codec: string;
+  selectedPlatform: string;
+}
+
+interface PlatformPreset {
+  format: Exclude<ExportFormat, 'original' | 'gif'>;
+  codec: string;
+  resolution: Resolution;
+  fps: number;
+}
+
+interface Platform {
+  id: string;
+  name: string;
+  icon: React.ComponentType<{ className?: string }>;
+  /** `null` = leave the current settings alone. */
+  preset: PlatformPreset | null;
+  description: string;
+}
+
+/** GIFs grow ~1 MB per second, so only the head of the take is converted. */
+const GIF_MAX_SECONDS = 15;
+const GIF_MAX_WIDTH = 640;
+
+const FORMAT_OPTIONS: Array<{ id: ExportFormat; label: string; hint: string }> = [
+  { id: 'original', label: 'Original', hint: 'No re-encode' },
+  { id: 'mp4', label: 'MP4', hint: 'H.264' },
+  { id: 'webm', label: 'WebM', hint: 'VP9' },
+  { id: 'mov', label: 'MOV', hint: 'H.264' },
+  { id: 'gif', label: 'GIF', hint: `First ${GIF_MAX_SECONDS}s` }
+];
+
+const PLATFORMS: Platform[] = [
+  {
+    id: 'youtube',
+    name: 'YouTube',
+    icon: Youtube,
+    preset: { format: 'mp4', codec: 'h264', resolution: { width: 1920, height: 1080 }, fps: 30 },
+    description: 'MP4 · H.264 · 1080p · 30 fps'
+  },
+  {
+    id: 'instagram',
+    name: 'Instagram',
+    icon: Instagram,
+    preset: { format: 'mp4', codec: 'h264', resolution: { width: 1080, height: 1080 }, fps: 30 },
+    description: 'MP4 · H.264 · 1080×1080 · 30 fps'
+  },
+  {
+    id: 'twitter',
+    name: 'Twitter',
+    icon: Twitter,
+    preset: { format: 'mp4', codec: 'h264', resolution: { width: 1280, height: 720 }, fps: 30 },
+    description: 'MP4 · H.264 · 720p · 30 fps'
+  },
+  {
+    id: 'facebook',
+    name: 'Facebook',
+    icon: Facebook,
+    preset: { format: 'mp4', codec: 'h264', resolution: { width: 1280, height: 720 }, fps: 30 },
+    description: 'MP4 · H.264 · 720p · 30 fps'
+  },
+  {
+    id: 'linkedin',
+    name: 'LinkedIn',
+    icon: Linkedin,
+    preset: { format: 'mp4', codec: 'h264', resolution: { width: 1920, height: 1080 }, fps: 30 },
+    description: 'MP4 · H.264 · 1080p · 30 fps'
+  },
+  {
+    id: 'custom',
+    name: 'Custom',
+    icon: Globe,
+    preset: null,
+    description: 'Keep the settings chosen below'
+  }
+];
+
+const RESOLUTION_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'source', label: 'Keep source resolution' },
+  { value: '3840x2160', label: '4K (3840x2160)' },
+  { value: '2560x1440', label: '2K (2560x1440)' },
+  { value: '1920x1080', label: 'Full HD (1920x1080)' },
+  { value: '1280x720', label: 'HD (1280x720)' },
+  { value: '854x480', label: 'SD (854x480)' }
+];
+
 /** Maps a recorded blob type (e.g. `video/webm;codecs=vp9`) to a file extension. */
 const getBlobExtension = (blob: Blob | null): string => {
   const subtype = blob?.type.split('/')[1]?.split(';')[0]?.trim().toLowerCase();
@@ -25,6 +159,9 @@ const getBlobExtension = (blob: Blob | null): string => {
   if (subtype === 'x-matroska') return 'mkv';
   return subtype;
 };
+
+/** The extension always follows the bytes we really hand out, never the request. */
+const extensionForBlob = (blob: Blob): string => getExtensionForBlob(blob, getBlobExtension(blob));
 
 /** Keeps file names safe for every OS. */
 const toSafeFileName = (name: string): string =>
@@ -54,28 +191,65 @@ export const EnhancedDownloadDialog: React.FC<EnhancedDownloadDialogProps> = ({
   onRecordingTagsChange,
   onRecordingFolderChange
 }) => {
-  const [activeTab, setActiveTab] = useState('format');
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [progress, setProgress] = useState(0);
+  const [activeTab, setActiveTab] = useState<'format' | 'social'>('format');
   const [newTag, setNewTag] = useState('');
   const [folders, setFolders] = useState<string[]>([]);
   const [isLoadingFolders, setIsLoadingFolders] = useState(false);
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [sourceDuration, setSourceDuration] = useState(0);
+  const [stage, setStage] = useState<ExportStage>('idle');
   const videoRef = useRef<HTMLVideoElement>(null);
   // Every object URL handed out, so none of them leak when the dialog closes
   const objectUrlsRef = useRef<string[]>([]);
+  // Lets the user (and `onClose`) stop a running ffmpeg job
+  const abortRef = useRef<AbortController | null>(null);
+
+  // The export job itself lives in the shared export store: it owns the real
+  // progress reported by ffmpeg, the error message and the finished blob.
+  const status = useExportStore((state) => state.status);
+  const progress = useExportStore((state) => state.progress);
+  const exportError = useExportStore((state) => state.error);
+  const startExport = useExportStore((state) => state.startExport);
+  const setProgress = useExportStore((state) => state.setProgress);
+  const completeExport = useExportStore((state) => state.completeExport);
+  const failExport = useExportStore((state) => state.failExport);
+  const cancelExport = useExportStore((state) => state.cancelExport);
+  const resetExport = useExportStore((state) => state.resetExport);
+
+  const isProcessing = status === 'processing';
 
   // Settings for exporting
-  const [settings, setSettings] = useState({
-    format: 'mp4',
+  const [settings, setSettings] = useState<DialogSettings>({
+    format: 'original',
     quality: 80,
-    resolution: { width: 1920, height: 1080 },
-    fps: 30,
+    resolution: null,
+    fps: null,
     codec: 'h264',
-    selectedPlatform: 'youtube'
+    selectedPlatform: 'custom'
   });
+
+  const needsTranscode = settings.format !== 'original';
+
+  // Capability probes run once: they only depend on the browser/page headers.
+  const ffmpegAvailable = useMemo(() => isFFmpegSupported(), []);
+  const isMultiThreaded = useMemo(() => hasSharedArrayBuffer() && isCrossOriginIsolated(), []);
+
+  const isTooLargeToConvert = !!recordedBlob && recordedBlob.size > MAX_INPUT_BYTES;
+  const canTranscode = ffmpegAvailable && !isTooLargeToConvert;
+
+  const conversionBlockedReason = !ffmpegAvailable
+    ? 'This browser cannot run the in-browser converter (WebAssembly and Web Workers are required). ' +
+      'The recording can still be saved or downloaded in its original format.'
+    : isTooLargeToConvert
+      ? `This recording is ${formatFileSize(recordedBlob?.size ?? 0)}, which is above the ` +
+        `${formatFileSize(MAX_INPUT_BYTES)} in-browser conversion limit. It can still be saved or ` +
+        'downloaded in its original format.'
+      : null;
+
+  const sourceExtension = getBlobExtension(recordedBlob);
+  const targetExtension = needsTranscode ? settings.format : sourceExtension;
+  const outputFileName = `${toSafeFileName(recordingTitle)}.${targetExtension}`;
 
   // Load folders
   useEffect(() => {
@@ -118,6 +292,27 @@ export const EnhancedDownloadDialog: React.FC<EnhancedDownloadDialogProps> = ({
     };
   }, [recordedBlob, isOpen]);
 
+  // Real duration of the take – needed to bound the GIF range
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !previewUrl) return;
+
+    const readDuration = () => {
+      // MediaRecorder files report Infinity until they are fully scanned.
+      setSourceDuration(Number.isFinite(video.duration) ? video.duration : 0);
+    };
+
+    readDuration();
+    video.addEventListener('loadedmetadata', readDuration);
+    video.addEventListener('durationchange', readDuration);
+
+    return () => {
+      video.removeEventListener('loadedmetadata', readDuration);
+      video.removeEventListener('durationchange', readDuration);
+    };
+    // `activeTab` remounts the <video>, so the listeners have to be re-attached.
+  }, [previewUrl, activeTab]);
+
   // Revoke any URL handed to the parent when the dialog closes or unmounts
   useEffect(() => {
     const urls = objectUrlsRef.current;
@@ -131,6 +326,20 @@ export const EnhancedDownloadDialog: React.FC<EnhancedDownloadDialogProps> = ({
       urls.length = 0;
     };
   }, [isOpen]);
+
+  // A closed dialog must never leave an ffmpeg job (or its worker) running
+  useEffect(() => {
+    if (isOpen) return;
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setStage('idle');
+    resetExport();
+  }, [isOpen, resetExport]);
+
+  useEffect(() => () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+  }, []);
 
   // Generate thumbnail when blob is available
   useEffect(() => {
@@ -161,46 +370,131 @@ export const EnhancedDownloadDialog: React.FC<EnhancedDownloadDialogProps> = ({
     };
   }, [recordedBlob, isOpen]);
 
+  /** Hands the finished bytes to the parent (cloud save) or to the browser. */
+  const deliver = (blob: Blob) => {
+    const fileName = `${toSafeFileName(recordingTitle)}.${extensionForBlob(blob)}`;
+    // The store owns the object URL of the finished export and revokes it when
+    // the next export starts or the dialog is reset.
+    const result = completeExport(blob, fileName);
+
+    if (onSave) {
+      objectUrlsRef.current.push(result.url);
+      onSave(blob, result.url, thumbnailUrl ?? '');
+      return;
+    }
+
+    downloadBlob(blob, fileName);
+    onClose();
+  };
+
+  /** Runs the real ffmpeg.wasm pipeline; `setProgress` is fed by ffmpeg itself. */
+  const runConversion = (blob: Blob, signal: AbortSignal): Promise<Blob> => {
+    // `processVideo`/`generateGif` forward ffmpeg's `progress` event here
+    // (percent = Math.round(event.progress * 100)) – nothing is interpolated.
+    const handleProgress = (value: number) => {
+      setStage('converting');
+      setProgress(value);
+    };
+
+    if (settings.format === 'gif') {
+      const endTime = sourceDuration > 0
+        ? Math.min(sourceDuration, GIF_MAX_SECONDS)
+        : GIF_MAX_SECONDS;
+
+      return generateGif(
+        blob,
+        {
+          fps: Math.min(settings.fps ?? 15, 20),
+          quality: settings.quality,
+          width: Math.min(settings.resolution?.width ?? GIF_MAX_WIDTH, GIF_MAX_WIDTH),
+          dither: true,
+          optimize: true,
+          startTime: 0,
+          endTime,
+          loop: true
+        },
+        handleProgress,
+        signal
+      );
+    }
+
+    return processVideo(
+      blob,
+      {
+        format: settings.format,
+        codec: settings.format === 'webm' ? 'vp9' : settings.codec,
+        resolution: settings.resolution ?? undefined,
+        fps: settings.fps ?? undefined,
+        quality: settings.quality,
+        metadata: {
+          title: recordingTitle.trim() || undefined,
+          tags: recordingTags.length > 0 ? recordingTags.join(', ') : undefined
+        }
+      },
+      handleProgress,
+      signal
+    );
+  };
+
+  const handleDownloadOriginal = () => {
+    if (!recordedBlob) return;
+    downloadBlob(recordedBlob, `${toSafeFileName(recordingTitle)}.${extensionForBlob(recordedBlob)}`);
+  };
+
   const handleExport = async () => {
     if (!recordedBlob || isProcessing) return;
 
-    setIsProcessing(true);
-    setProgress(0);
-    setError(null);
+    const controller = new AbortController();
+    abortRef.current = controller;
+    startExport();
 
     try {
-      // Simulated export process with progress updates
-      for (let i = 0; i <= 100; i += 10) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        setProgress(i);
+      if (!needsTranscode) {
+        // Pass-through: there is nothing to encode, so there is no progress to
+        // report either – the file is handed over straight away.
+        setStage('finishing');
+        deliver(recordedBlob);
+        return;
       }
 
-      // Create a download URL
-      const url = URL.createObjectURL(recordedBlob);
-      
-      if (onSave) {
-        // Save to database – the URL stays alive until this dialog unmounts
-        objectUrlsRef.current.push(url);
-        onSave(recordedBlob, url, thumbnailUrl ?? '');
-      } else {
-        // Direct download, using the extension the recording really has
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${toSafeFileName(recordingTitle)}.${getBlobExtension(recordedBlob)}`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        // Give the browser a tick to pick up the download before releasing it
-        window.setTimeout(() => URL.revokeObjectURL(url), 10000);
-        onClose();
+      if (!ffmpegAvailable) {
+        throw new Error(
+          'Video conversion is not available in this browser: it requires WebAssembly and Web Workers.'
+        );
       }
+
+      setStage('engine');
+      const converted = await runConversion(recordedBlob, controller.signal);
+      setStage('finishing');
+      deliver(converted);
     } catch (err) {
-      console.error('Export failed:', err);
-      setError('Export failed. Please try again.');
+      if (isCancellation(err)) {
+        cancelExport();
+        return;
+      }
+
+      // Real failure (core could not load, unsupported settings, out of memory…):
+      // report what actually went wrong and hand over the untouched recording
+      // instead of pretending the export succeeded.
+      const extension = extensionForBlob(recordedBlob);
+      downloadBlob(recordedBlob, `${toSafeFileName(recordingTitle)}.${extension}`);
+      failExport(
+        new Error(
+          `${toError(err).message} Nothing was converted – the original ${extension.toUpperCase()} ` +
+            'recording was downloaded instead.'
+        )
+      );
     } finally {
-      setIsProcessing(false);
-      setProgress(0);
+      abortRef.current = null;
+      setStage('idle');
     }
+  };
+
+  const handleCancel = () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    cancelExport();
+    setStage('idle');
   };
 
   const handleAddTag = () => {
@@ -214,14 +508,41 @@ export const EnhancedDownloadDialog: React.FC<EnhancedDownloadDialogProps> = ({
     onRecordingTagsChange(recordingTags.filter(tag => tag !== tagToRemove));
   };
 
-  const platforms = [
-    { id: 'youtube', name: 'YouTube', icon: Youtube },
-    { id: 'instagram', name: 'Instagram', icon: Instagram },
-    { id: 'twitter', name: 'Twitter', icon: Twitter },
-    { id: 'facebook', name: 'Facebook', icon: Facebook },
-    { id: 'linkedin', name: 'LinkedIn', icon: Linkedin },
-    { id: 'custom', name: 'Custom', icon: Globe }
-  ];
+  const selectFormat = (format: ExportFormat) => {
+    // Touching the format by hand leaves any platform preset behind.
+    setSettings(prev => ({ ...prev, format, selectedPlatform: 'custom' }));
+  };
+
+  const selectPlatform = (platformId: string) => {
+    const platform = PLATFORMS.find(item => item.id === platformId);
+    if (!platform) return;
+
+    const preset = platform.preset;
+    if (!preset) {
+      setSettings(prev => ({ ...prev, selectedPlatform: platformId }));
+      return;
+    }
+
+    setSettings(prev => ({
+      ...prev,
+      selectedPlatform: platformId,
+      format: preset.format,
+      codec: preset.codec,
+      resolution: preset.resolution,
+      fps: preset.fps
+    }));
+  };
+
+  const currentResolutionValue = settings.resolution
+    ? `${settings.resolution.width}x${settings.resolution.height}`
+    : 'source';
+  const resolutionOptions = RESOLUTION_OPTIONS.some(option => option.value === currentResolutionValue)
+    ? RESOLUTION_OPTIONS
+    : [...RESOLUTION_OPTIONS, { value: currentResolutionValue, label: `Custom (${currentResolutionValue})` }];
+
+  const actionLabel = onSave
+    ? needsTranscode ? 'Convert & Save' : 'Save Recording'
+    : needsTranscode ? 'Convert & Download' : 'Download Recording';
 
   if (!isOpen) return null;
 
@@ -231,7 +552,7 @@ export const EnhancedDownloadDialog: React.FC<EnhancedDownloadDialogProps> = ({
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
+      onClick={(e) => e.target === e.currentTarget && !isProcessing && onClose()}
     >
       <motion.div
         initial={{ scale: 0.95, opacity: 0 }}
@@ -243,17 +564,37 @@ export const EnhancedDownloadDialog: React.FC<EnhancedDownloadDialogProps> = ({
           <h3 className="text-lg font-semibold">Save Recording</h3>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-gray-100 rounded-lg"
+            disabled={isProcessing}
+            className="p-2 hover:bg-gray-100 rounded-lg disabled:opacity-50"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         <div className="p-6">
-          {error && (
+          {exportError && (
             <div className="mb-4 p-3 rounded-lg border border-[#E44E51]/30 bg-[#E44E51]/10 
-              text-sm text-[#E44E51]">
-              {error}
+              text-sm text-[#E44E51] flex items-start space-x-2">
+              <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+              <div className="space-y-2">
+                <p>{exportError}</p>
+                {recordedBlob && (
+                  <button
+                    onClick={handleDownloadOriginal}
+                    className="underline hover:no-underline"
+                  >
+                    Download the original file again
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {conversionBlockedReason && (
+            <div className="mb-4 p-3 rounded-lg border border-amber-300 bg-amber-50 text-sm 
+              text-amber-800 flex items-start space-x-2">
+              <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+              <p>{conversionBlockedReason}</p>
             </div>
           )}
 
@@ -334,7 +675,7 @@ export const EnhancedDownloadDialog: React.FC<EnhancedDownloadDialogProps> = ({
               </div>
               <div className="mt-1 flex justify-end">
                 <button 
-                  onClick={async () => {
+                  onClick={() => {
                     const folderName = prompt('Enter new folder name:');
                     if (folderName && !folders.includes(folderName)) {
                       setFolders([...folders, folderName]);
@@ -393,7 +734,8 @@ export const EnhancedDownloadDialog: React.FC<EnhancedDownloadDialogProps> = ({
 
                   {recordedBlob && (
                     <p className="mt-2 text-xs text-gray-500">
-                      {getBlobExtension(recordedBlob).toUpperCase()} · {formatFileSize(recordedBlob.size)}
+                      {sourceExtension.toUpperCase()} · {formatFileSize(recordedBlob.size)}
+                      {sourceDuration > 0 && ` · ${sourceDuration.toFixed(1)}s`}
                     </p>
                   )}
                   
@@ -420,76 +762,61 @@ export const EnhancedDownloadDialog: React.FC<EnhancedDownloadDialogProps> = ({
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Export Format
                       </label>
-                      <div className="grid grid-cols-4 gap-3">
-                        {['mp4', 'webm', 'mov', 'gif'].map((format) => (
-                          <button
-                            key={format}
-                            onClick={() => setSettings({ ...settings, format })}
-                            className={`p-3 rounded-lg border text-center ${
-                              settings.format === format
-                                ? 'border-[#E44E51] bg-[#E44E51]/5'
-                                : 'border-gray-200 hover:border-gray-300'
-                            }`}
-                          >
-                            <span className="font-medium text-lg uppercase">{format}</span>
-                          </button>
-                        ))}
-                      </div>
-                      <p className="mt-2 text-xs text-gray-500">
-                        Recordings are saved in their original{' '}
-                        {getBlobExtension(recordedBlob).toUpperCase()} format; the selected format is
-                        used for platform presets.
-                      </p>
-                    </div>
-                    
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Optimize for Platform
-                      </label>
-                      <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
-                        {platforms.map((platform) => {
-                          const Icon = platform.icon;
+                      <div className="grid grid-cols-5 gap-3">
+                        {FORMAT_OPTIONS.map((option) => {
+                          const disabled = option.id !== 'original' && !canTranscode;
                           return (
                             <button
-                              key={platform.id}
-                              onClick={() => setSettings({ 
-                                ...settings, 
-                                selectedPlatform: platform.id 
-                              })}
-                              className={`p-3 rounded-lg border flex flex-col items-center ${
-                                settings.selectedPlatform === platform.id
+                              key={option.id}
+                              onClick={() => selectFormat(option.id)}
+                              disabled={disabled || isProcessing}
+                              className={`p-3 rounded-lg border text-center disabled:opacity-40 
+                                disabled:cursor-not-allowed ${
+                                settings.format === option.id
                                   ? 'border-[#E44E51] bg-[#E44E51]/5'
                                   : 'border-gray-200 hover:border-gray-300'
                               }`}
                             >
-                              <Icon className="w-6 h-6 mb-1" />
-                              <span className="text-xs">{platform.name}</span>
+                              <span className="block font-medium uppercase">{option.label}</span>
+                              <span className="block text-[10px] text-gray-500">{option.hint}</span>
                             </button>
                           );
                         })}
                       </div>
+                      <p className="mt-2 text-xs text-gray-500">
+                        {needsTranscode
+                          ? `The recording is re-encoded to ${settings.format.toUpperCase()} with FFmpeg in your browser; ` +
+                            'the progress bar follows the encoder.'
+                          : `The recording is kept exactly as captured (${sourceExtension.toUpperCase()}) – no re-encoding, no quality loss.`}
+                      </p>
                     </div>
-                    
+
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Resolution
                       </label>
                       <select
-                        value={`${settings.resolution.width}x${settings.resolution.height}`}
+                        value={currentResolutionValue}
                         onChange={(e) => {
-                          const [width, height] = e.target.value.split('x').map(Number);
-                          setSettings({ 
-                            ...settings, 
-                            resolution: { width, height }
-                          });
+                          const value = e.target.value;
+                          if (value === 'source') {
+                            setSettings(prev => ({ ...prev, resolution: null, selectedPlatform: 'custom' }));
+                            return;
+                          }
+                          const [width, height] = value.split('x').map(Number);
+                          setSettings(prev => ({
+                            ...prev,
+                            resolution: { width, height },
+                            selectedPlatform: 'custom'
+                          }));
                         }}
-                        className="block w-full rounded-md border-gray-300 shadow-sm focus:border-[#E44E51] focus:ring-[#E44E51]"
+                        disabled={!needsTranscode || isProcessing}
+                        className="block w-full rounded-md border-gray-300 shadow-sm focus:border-[#E44E51] 
+                          focus:ring-[#E44E51] disabled:opacity-60"
                       >
-                        <option value="3840x2160">4K (3840x2160)</option>
-                        <option value="2560x1440">2K (2560x1440)</option>
-                        <option value="1920x1080">Full HD (1920x1080)</option>
-                        <option value="1280x720">HD (1280x720)</option>
-                        <option value="854x480">SD (854x480)</option>
+                        {resolutionOptions.map(option => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
                       </select>
                     </div>
                     
@@ -504,54 +831,149 @@ export const EnhancedDownloadDialog: React.FC<EnhancedDownloadDialogProps> = ({
                       </div>
                       <input
                         type="range"
-                        min="0"
+                        min="10"
                         max="100"
                         value={settings.quality}
-                        onChange={(e) => setSettings({
-                          ...settings,
-                          quality: parseInt(e.target.value)
-                        })}
-                        className="w-full accent-[#E44E51]"
+                        onChange={(e) => setSettings(prev => ({
+                          ...prev,
+                          quality: parseInt(e.target.value, 10) || prev.quality,
+                          selectedPlatform: 'custom'
+                        }))}
+                        disabled={!needsTranscode || isProcessing}
+                        className="w-full accent-[#E44E51] disabled:opacity-60"
                       />
                       <div className="flex justify-between text-xs text-gray-500 mt-1">
                         <span>Smaller file</span>
                         <span>Better quality</span>
                       </div>
+                      {!needsTranscode && (
+                        <p className="mt-2 text-xs text-gray-500 flex items-start">
+                          <Info className="w-3 h-3 mr-1 mt-0.5 flex-shrink-0" />
+                          Resolution and quality only apply when a conversion format is selected.
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>
               </div>
             )}
+
+            {activeTab === 'social' && (
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Optimize for Platform
+                  </label>
+                  <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
+                    {PLATFORMS.map((platform) => {
+                      const Icon = platform.icon;
+                      const disabled = !!platform.preset && (!canTranscode || isProcessing);
+                      return (
+                        <button
+                          key={platform.id}
+                          onClick={() => selectPlatform(platform.id)}
+                          disabled={disabled}
+                          className={`p-3 rounded-lg border flex flex-col items-center disabled:opacity-40 
+                            disabled:cursor-not-allowed ${
+                            settings.selectedPlatform === platform.id
+                              ? 'border-[#E44E51] bg-[#E44E51]/5'
+                              : 'border-gray-200 hover:border-gray-300'
+                          }`}
+                        >
+                          <Icon className="w-6 h-6 mb-1" />
+                          <span className="text-xs">{platform.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-lg bg-gray-50 border border-gray-200 text-sm text-gray-600">
+                  <p className="font-medium text-gray-700 mb-1">
+                    {PLATFORMS.find(p => p.id === settings.selectedPlatform)?.name ?? 'Custom'} preset
+                  </p>
+                  <p>{PLATFORMS.find(p => p.id === settings.selectedPlatform)?.description}</p>
+                  <p className="mt-2 text-xs">
+                    {needsTranscode
+                      ? `FFmpeg will re-encode the take to ${settings.format.toUpperCase()}` +
+                        `${settings.resolution ? ` at ${settings.resolution.width}×${settings.resolution.height}` : ''}` +
+                        `${settings.fps ? ` · ${settings.fps} fps` : ''} · quality ${settings.quality}%.`
+                      : `No conversion selected – the original ${sourceExtension.toUpperCase()} file is used as is.`}
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
+
+          {/* Real progress: 0 until ffmpeg emits its first `progress` event */}
+          {isProcessing && (
+            <div className="mb-4 space-y-2">
+              {needsTranscode ? (
+                <>
+                  <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-[#E44E51] transition-[width] duration-200"
+                      style={{ width: `${progress}%` }}
+                    />
+                  </div>
+                  <p className="text-sm text-gray-600">
+                    {stage === 'engine'
+                      ? 'Starting the video engine…'
+                      : `Converting with FFmpeg… ${progress}%`}
+                  </p>
+                </>
+              ) : (
+                <p className="text-sm text-gray-600 flex items-center">
+                  <Loader className="w-4 h-4 mr-2 animate-spin" />
+                  Preparing your file…
+                </p>
+              )}
+              {needsTranscode && !isMultiThreaded && (
+                <p className="text-xs text-gray-500">
+                  This page is not cross-origin isolated (no SharedArrayBuffer), so the encoder runs
+                  single-threaded and can take a while for long takes.
+                </p>
+              )}
+            </div>
+          )}
+
+          {status === 'done' && onSave && (
+            <p className="mb-4 text-sm text-gray-600">
+              Export ready ({outputFileName}) – saving it to your library…
+            </p>
+          )}
 
           {/* Export Button */}
           <div className="mt-4 border-t pt-4">
-            <div className="flex justify-end space-x-2">
-              <button
-                onClick={onClose}
-                className="px-4 py-2 text-gray-600 hover:text-gray-800"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleExport}
-                disabled={isProcessing || !recordedBlob || !recordingTitle.trim()}
-                className="px-4 py-2 bg-[#E44E51] text-white rounded-lg hover:bg-[#D43B3E]
-                  disabled:opacity-50 disabled:cursor-not-allowed shadow-lg 
-                  hover:shadow-[#E44E51]/25 flex items-center space-x-2"
-              >
-                {isProcessing ? (
-                  <>
-                    <Loader className="w-4 h-4 animate-spin" />
-                    <span>Processing... {progress}%</span>
-                  </>
-                ) : (
-                  <>
-                    <Save className="w-4 h-4" />
-                    <span>Save Recording</span>
-                  </>
-                )}
-              </button>
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-gray-500 truncate mr-4">{outputFileName}</span>
+              <div className="flex space-x-2">
+                <button
+                  onClick={isProcessing ? handleCancel : onClose}
+                  className="px-4 py-2 text-gray-600 hover:text-gray-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleExport}
+                  disabled={isProcessing || !recordedBlob || !recordingTitle.trim()}
+                  className="px-4 py-2 bg-[#E44E51] text-white rounded-lg hover:bg-[#D43B3E]
+                    disabled:opacity-50 disabled:cursor-not-allowed shadow-lg 
+                    hover:shadow-[#E44E51]/25 flex items-center space-x-2"
+                >
+                  {isProcessing ? (
+                    <>
+                      <Loader className="w-4 h-4 animate-spin" />
+                      <span>{needsTranscode ? `Converting… ${progress}%` : 'Preparing…'}</span>
+                    </>
+                  ) : (
+                    <>
+                      {onSave ? <Save className="w-4 h-4" /> : <Download className="w-4 h-4" />}
+                      <span>{actionLabel}</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>
