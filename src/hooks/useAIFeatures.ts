@@ -195,10 +195,9 @@ export const useAIFeatures = () => {
         updateFeatureStatus('facialLandmarks', 'loading');
         
         try {
-          loadedModels.faceLandmarks = await faceLandmarksDetection.createDetector(
+          loadedModels.faceLandmarks = await faceLandmarksDetection.load(
             faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
             {
-              runtime: 'tfjs',
               refineLandmarks: processingQuality !== 'low',
               maxFaces: processingQuality === 'low' ? 1 : (processingQuality === 'medium' ? 2 : 5)
             }
@@ -219,7 +218,7 @@ export const useAIFeatures = () => {
         updateFeatureStatus('gestureRecognition', 'loading');
         
         try {
-          loadedModels.handPose = await handPoseDetection.createDetector(
+          loadedModels.handPose = await handPoseDetection.load(
             handPoseDetection.SupportedModels.MediaPipeHands,
             {
               runtime: 'tfjs',
@@ -250,7 +249,7 @@ export const useAIFeatures = () => {
             SupportedModels.MediaPipeSelfieSegmentation,
             {
               runtime: 'tfjs',
-              modelType: processingQuality === 'low' ? 'landscape' : 'general'
+              modelType: processingQuality === 'low' ? 'lite' : 'general'
             }
           );
           newModelsLoaded.add('bodySegmentation');

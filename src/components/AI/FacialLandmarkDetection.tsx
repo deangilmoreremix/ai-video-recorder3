@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as tf from '@tensorflow/tfjs';
 import * as faceLandmarksDetection from '@tensorflow-models/face-landmarks-detection';
+import { MediaPipeFaceMesh } from '@tensorflow-models/face-landmarks-detection';
 import { Loader, Settings } from 'lucide-react';
 
 interface FacialLandmarkDetectionProps {
@@ -35,7 +36,7 @@ export const FacialLandmarkDetection: React.FC<FacialLandmarkDetectionProps> = (
   }
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [model, setModel] = useState<any>(null);
+  const [model, setModel] = useState<MediaPipeFaceMesh | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -66,10 +67,9 @@ export const FacialLandmarkDetection: React.FC<FacialLandmarkDetectionProps> = (
         await tf.ready();
         
         // Load the face landmark detection model
-        const loadedModel = await faceLandmarksDetection.createDetector(
+        const loadedModel = await faceLandmarksDetection.load(
           faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
           {
-            runtime: 'tfjs',
             refineLandmarks: true,
             maxFaces: settings.maxFaces
           }

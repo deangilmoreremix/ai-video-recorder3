@@ -502,23 +502,7 @@ export const VideoStabilization: React.FC<VideoStabilizationProps> = ({
           </button>
           
           <button
-            onClick={() => {
-              if (outputCanvasRef.current) {
-                const canvas = outputCanvasRef.current;
-                canvas.toBlob((blob) => {
-                  if (blob) {
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = 'stabilized-video.png';
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(url);
-                  }
-                }, 'image/png');
-              }
-            }}
+            onClick={() => {}}
             className="flex items-center justify-center px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-800 transition-colors"
             disabled={isProcessing}
           >
