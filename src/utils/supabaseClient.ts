@@ -168,6 +168,81 @@ export const isSafeMediaUrl = (url: string | null | undefined): boolean => {
   }
 };
 
+/**
+ * A Supabase Storage object path has no scheme and looks like `userId/file.webm`.
+ * We accept these as valid "urls" in the database even though they are not
+ * directly playable — `getRecordings` resolves them to signed URLs.
+ */
+export const isStoragePath = (value: string | null | undefined): boolean => {
+  if (typeof value !== 'string') return false;
+  const trimmed = value.trim();
+  return trimmed.length > 0 && !trimmed.includes('://') && /^[^/]+\/.+/.test(trimmed);
+};
+
+const isValidMediaRef = (value: string | null | undefined): boolean =>
+  isSafeMediaUrl(value) || isStoragePath(value);
+
+export const RECORDINGS_BUCKET = 'recordings';
+
+export interface UploadResult {
+  path: string | null;
+  error: string | null;
+}
+
+/**
+ * Uploads a recording (or thumbnail) blob to the private `recordings` bucket.
+ * The path is always namespaced by the signed-in user id so the Storage RLS
+ * policy (`(storage.foldername(name))[1] = auth.uid()`) permits the write.
+ */
+export const uploadRecordingMedia = async (
+  blob: Blob,
+  fileName: string,
+  subFolder = ''
+): Promise<UploadResult> => {
+  if (!supabase) return { path: null, error: NOT_CONFIGURED_MESSAGE };
+
+  const userId = await getCurrentUserId();
+  if (!userId) return { path: null, error: NOT_AUTHENTICATED_MESSAGE };
+
+  const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120);
+  const path = subFolder ? `${userId}/${subFolder}/${safeName}` : `${userId}/${safeName}`;
+
+  try {
+    const { error } = await supabase.storage
+      .from(RECORDINGS_BUCKET)
+      .upload(path, blob, { cacheControl: '3600', upsert: false });
+
+    if (error) {
+      console.error('Error uploading recording media:', error.message);
+      return { path: null, error: errorMessage(error, 'Could not upload this recording.') };
+    }
+    return { path, error: null };
+  } catch (err) {
+    console.error('Error uploading recording media:', err);
+    return { path: null, error: 'Could not upload this recording.' };
+  }
+};
+
+/** Resolves a Storage path to a time-limited signed URL (private bucket). */
+export const getRecordingSignedUrl = async (path: string): Promise<string | null> => {
+  if (!supabase) return null;
+  if (!isStoragePath(path)) return isSafeMediaUrl(path) ? path : null;
+
+  try {
+    const { data, error } = await supabase.storage
+      .from(RECORDINGS_BUCKET)
+      .createSignedUrl(path, 60 * 60);
+    if (error) {
+      console.error('Error creating signed URL:', error.message);
+      return null;
+    }
+    return data?.signedUrl ?? null;
+  } catch (err) {
+    console.error('Error creating signed URL:', err);
+    return null;
+  }
+};
+
 const errorMessage = (error: { message?: string } | null | undefined, fallback: string): string =>
   error && typeof error.message === 'string' && error.message.length > 0 ? error.message : fallback;
 
@@ -248,10 +323,20 @@ export const getRecordings = async (): Promise<Recording[]> => {
     }
   });
 
-  return rows.map((recording) => ({
-    ...recording,
-    tags: tagsByRecording.get(recording.id) ?? [],
-  }));
+  // Resolve private Storage paths to time-limited signed URLs so the UI can
+  // actually play the recordings. Safe URLs (http/https/blob) are passed through.
+  const withUrls = await Promise.all(
+    rows.map(async (recording) => ({
+      ...recording,
+      url: (await getRecordingSignedUrl(recording.url)) ?? recording.url,
+      thumbnail: recording.thumbnail
+        ? (await getRecordingSignedUrl(recording.thumbnail)) ?? recording.thumbnail
+        : null,
+      tags: tagsByRecording.get(recording.id) ?? [],
+    }))
+  );
+
+  return withUrls;
 };
 
 export const addRecording = async (recording: NewRecording): Promise<MutationResult<Recording>> => {
@@ -264,8 +349,8 @@ export const addRecording = async (recording: NewRecording): Promise<MutationRes
   if (!title) {
     return { data: null, error: 'Please provide a title for this recording.' };
   }
-  if (!isSafeMediaUrl(fields.url)) {
-    return { data: null, error: 'This recording has no valid video URL to save.' };
+  if (!isValidMediaRef(fields.url)) {
+    return { data: null, error: 'This recording has no valid video to save.' };
   }
 
   const userId = await getCurrentUserId();
@@ -332,7 +417,7 @@ export const updateRecording = async (
     recordingUpdates.title = title;
   }
   if ('url' in recordingUpdates) {
-    if (!isSafeMediaUrl(rest.url)) return { error: 'That video URL is not valid.' };
+    if (!isValidMediaRef(rest.url)) return { error: 'That video URL is not valid.' };
   }
   if ('thumbnail' in recordingUpdates) {
     recordingUpdates.thumbnail = isSafeMediaUrl(rest.thumbnail) ? rest.thumbnail : null;
@@ -396,6 +481,14 @@ export const deleteRecording = async (id: string): Promise<ActionResult> => {
   const userId = await getCurrentUserId();
   if (!userId) return { error: NOT_AUTHENTICATED_MESSAGE };
 
+  // Capture the Storage paths before deleting the row so we can clean them up.
+  const { data: existing, error: fetchError } = await supabase
+    .from('recordings')
+    .select('url, thumbnail')
+    .eq('id', id)
+    .eq('user_id', userId)
+    .single();
+
   // Tags are removed automatically through ON DELETE CASCADE
   const { data, error } = await supabase
     .from('recordings')
@@ -410,6 +503,14 @@ export const deleteRecording = async (id: string): Promise<ActionResult> => {
   }
   if (!data || data.length === 0) {
     return { error: NOT_FOUND_MESSAGE };
+  }
+
+  // Best-effort cleanup of the underlying Storage objects (ignore failures).
+  if (!fetchError && existing) {
+    const paths = [existing.url, existing.thumbnail].filter(isStoragePath);
+    if (paths.length > 0) {
+      void supabase.storage.from(RECORDINGS_BUCKET).remove(paths).catch(() => undefined);
+    }
   }
 
   return { error: null };

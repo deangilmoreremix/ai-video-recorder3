@@ -14,7 +14,7 @@ import { AIProcessingOverlay } from '../AI/AIProcessingOverlay';
 import { EnhancedDownloadDialog } from './EnhancedDownloadDialog';
 import { Tooltip } from '../ui/Tooltip';
 import { motion, AnimatePresence } from 'framer-motion';
-import { addRecording } from '../../utils/supabaseClient';
+import { addRecording, uploadRecordingMedia } from '../../utils/supabaseClient';
 
 interface AudioDevice {
   deviceId: string;
@@ -564,7 +564,7 @@ export const VideoRecorder: React.FC = () => {
     setRecordedBlob(processedBlob);
   };
   
-  const saveRecordingToDatabase = async (blob: Blob, videoUrl: string, thumbnailUrl: string) => {
+  const saveRecordingToDatabase = async (blob: Blob) => {
     try {
       // Get metadata from the video
       let duration = 0;
@@ -580,12 +580,21 @@ export const VideoRecorder: React.FC = () => {
       
       // Get file format from blob type
       const format = blob.type.split('/')[1]?.split(';')[0] || 'webm';
+      const fileName = `${crypto.randomUUID()}.${format}`;
       
-      // Save to database
-      await addRecording({
+      // Upload the media to the private Storage bucket; the helper namespaces
+      // the path by the signed-in user id so RLS permits the write.
+      const { path, error: uploadError } = await uploadRecordingMedia(blob, fileName);
+      if (uploadError || !path) {
+        setError(uploadError ?? 'Could not upload the recording.');
+        return;
+      }
+      
+      // Persist the Storage path (resolved to a signed URL when listed)
+      const { error } = await addRecording({
         title: recordingTitle,
-        url: videoUrl,
-        thumbnail: thumbnailUrl,
+        url: path,
+        thumbnail: null,
         duration,
         size: blob.size,
         resolution: `${width}x${height}`,
@@ -594,6 +603,11 @@ export const VideoRecorder: React.FC = () => {
         folder: recordingFolder,
         tags: recordingTags
       });
+      
+      if (error) {
+        setError(error);
+        return;
+      }
       
       // Close dialog and reset state
       setShowDownloadDialog(false);
@@ -1095,7 +1109,7 @@ export const VideoRecorder: React.FC = () => {
         isOpen={showDownloadDialog}
         onClose={() => setShowDownloadDialog(false)}
         recordedBlob={recordedBlob}
-        onSave={(blob, videoUrl, thumbnailUrl) => saveRecordingToDatabase(blob, videoUrl, thumbnailUrl)}
+        onSave={(blob) => saveRecordingToDatabase(blob)}
         recordingTitle={recordingTitle}
         recordingTags={recordingTags}
         recordingFolder={recordingFolder}
