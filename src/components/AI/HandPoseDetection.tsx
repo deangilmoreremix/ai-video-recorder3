@@ -267,7 +267,7 @@ export const HandPoseDetection: React.FC<HandPoseDetectionProps> = ({
       }
 
       // Draw gesture label if detected
-      if (gestureDetection && lastDetectedGestures.length > 0) {
+      if (gestureDetection) {
         const gesture = detectGesture(hand);
         if (gesture !== 'unknown') {
           ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
@@ -280,7 +280,7 @@ export const HandPoseDetection: React.FC<HandPoseDetectionProps> = ({
       }
     });
   }, [videoRef, minConfidence, pointColor, drawPoints, drawSkeleton, skeletonColor,
-      gestureDetection, lastDetectedGestures, detectGesture]);
+      gestureDetection, detectGesture]);
 
   useEffect(() => {
     let animationFrame: number | undefined;

@@ -4,7 +4,26 @@ import * as blazeface from '@tensorflow-models/blazeface';
 import * as bodySegmentation from '@tensorflow-models/body-segmentation';
 import * as faceLandmarksDetection from '@tensorflow-models/face-landmarks-detection';
 import * as handPoseDetection from '@tensorflow-models/hand-pose-detection';
+import * as poseDetection from '@tensorflow-models/pose-detection';
 import { SupportedModels } from '@tensorflow-models/body-segmentation';
+import {
+  Rect,
+  getScratchCanvas,
+  toGrayscale,
+  estimateTranslation,
+  FrameStabilizer,
+  mapPoint,
+  mapRect,
+  computeFrameStats,
+  buildToneLUT,
+  applyToneAndColor,
+  temporalDenoise,
+  spatialDenoise,
+  beautifyRegion,
+  histogramDistance,
+  computeHistogram,
+  processVideoToBlob
+} from '../components/AI/aiProcessing';
 
 export interface AIFeature {
   enabled: boolean;
@@ -23,15 +42,53 @@ interface Models {
   bodySegmentation?: bodySegmentation.BodySegmenter;
   faceLandmarks?: faceLandmarksDetection.FaceLandmarksDetector;
   handPose?: handPoseDetection.HandDetector;
+  pose?: poseDetection.PoseDetector;
 }
 
-// Contour indices for the MediaPipe FaceMesh keypoints (lips, eyes, irises, ...)
+export interface FeatureInfo {
+  id: string;
+  name: string;
+  description: string;
+}
+
+// Single source of truth for the shipped feature set. Every entry here has a
+// genuine implementation in `processFrame` (or a dedicated component). Features
+// that could not be made genuinely real have been REMOVED (no mocks shipped).
+export const AI_FEATURE_REGISTRY: FeatureInfo[] = [
+  { id: 'faceDetection', name: 'Face Detection', description: 'Detect and track faces in real-time (BlazeFace)' },
+  { id: 'facialLandmarks', name: 'Facial Landmarks', description: 'Track 468 facial points (MediaPipe FaceMesh)' },
+  { id: 'expressionDetection', name: 'Expression Detection', description: 'Classify expressions from landmark geometry' },
+  { id: 'handPoseEstimation', name: 'Hand Tracking', description: 'Detect hands, 21 keypoints (MediaPipe Hands)' },
+  { id: 'gestureRecognition', name: 'Gesture Recognition', description: 'Recognise hand gestures from keypoints' },
+  { id: 'poseEstimation', name: 'Pose Estimation', description: 'Detect body pose skeleton (MoveNet)' },
+  { id: 'backgroundRemoval', name: 'Background Removal', description: 'Segment person, keep foreground (SelfieSeg)' },
+  { id: 'backgroundBlur', name: 'Background Blur', description: 'Blur background, keep subject (SelfieSeg)' },
+  { id: 'autoFraming', name: 'Auto Framing', description: 'Track the subject and reframe the shot' },
+  { id: 'beautification', name: 'Beautification', description: 'Edge-preserving skin smoothing on faces' },
+  { id: 'enhancedLighting', name: 'Enhanced Lighting', description: 'Auto levels + gamma from luminance histogram' },
+  { id: 'autoExposure', name: 'Auto Exposure', description: 'Exposure correction toward a neutral midtone' },
+  { id: 'colorEnhancement', name: 'Color Enhancement', description: 'Gray-world white balance + saturation' },
+  { id: 'stabilization', name: 'Stabilization', description: 'Translational stabilisation via motion tracking' },
+  { id: 'denoising', name: 'Denoising', description: 'Temporal + edge-preserving spatial noise reduction' },
+  { id: 'sceneDetection', name: 'Scene Detection', description: 'Detect shot changes from frame histograms' },
+  { id: 'speechRecognition', name: 'Speech Recognition', description: 'Live captions via the Web Speech API' }
+];
+
+const FEATURE_IDS = AI_FEATURE_REGISTRY.map(f => f.id);
+
+const createDefaultFeatures = (): AIFeatures => {
+  const out: AIFeatures = {};
+  for (const id of FEATURE_IDS) {
+    out[id] = { enabled: false, sensitivity: 0.5 };
+  }
+  return out;
+};
+
+// MediaPipe FaceMesh contour indices (lips / eyes / irises / oval).
 const FACE_MESH_CONTOURS = faceLandmarksDetection.util.getKeypointIndexByContour(
   faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh
 );
 
-// blazeface returns plain numbers when `returnTensors` is false, but its types
-// still allow tensors - normalize both shapes without leaking tensors.
 const toNumber = (value: unknown): number | undefined => {
   if (typeof value === 'number') return value;
   if (Array.isArray(value) && typeof value[0] === 'number') return value[0];
@@ -45,75 +102,131 @@ const toPoint = (value: unknown): [number, number] | undefined => {
   return undefined;
 };
 
-// Bounding box of a set of face mesh keypoints (the v1 API exposes `box`)
-const getFaceBox = (face: faceLandmarksDetection.Face) => {
+const getFaceBox = (face: faceLandmarksDetection.Face): Rect | null => {
   const box = face.box;
   if (box) {
-    return { x: box.xMin, y: box.yMin, width: box.width, height: box.height };
+    return { x: box.xMin, y: box.yMin, w: box.width, h: box.height };
   }
-
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
   for (const point of face.keypoints) {
     minX = Math.min(minX, point.x);
     minY = Math.min(minY, point.y);
     maxX = Math.max(maxX, point.x);
     maxY = Math.max(maxY, point.y);
   }
-
   if (!Number.isFinite(minX)) return null;
-  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+};
+
+/** Decide a facial expression from tracked landmark geometry (no model needed). */
+const classifyExpression = (keypoints: { x: number; y: number }[], sensitivity: number): string => {
+  const at = (i: number) => keypoints[i];
+  const interocular =
+    Math.hypot(at(33).x - at(263).x, at(33).y - at(263).y) || 1;
+  const mouthW = Math.hypot(at(61).x - at(291).x, at(61).y - at(291).y);
+  const mouthOpen = Math.hypot(at(13).x - at(14).x, at(13).y - at(14).y);
+  const uMouth = (at(61).y + at(291).y) / 2;
+  const lMouth = (at(14).y + at(17).y) / 2;
+  const cornerUp = lMouth < uMouth;
+  const smileRatio = mouthW / interocular;
+  const openRatio = mouthOpen / interocular;
+  const browRaise =
+    (Math.hypot(at(159).x - at(145).x, at(159).y - at(145).y)) /
+    (Math.hypot(at(33).x - at(133).x, at(33).y - at(133).y) || 1);
+
+  const s = sensitivity;
+  if (openRatio > 0.35 && browRaise > 1.05) return 'Surprised';
+  if (smileRatio > 1.1 - s * 0.2 && cornerUp) return 'Happy';
+  if (smileRatio < 0.75 + s * 0.2 && !cornerUp) return 'Sad';
+  if (openRatio > 0.12 && openRatio <= 0.35) return 'Talking';
+  return 'Neutral';
+};
+
+/** Decide a hand gesture from the 21 MediaPipe hand keypoints. */
+export const classifyGesture = (hand: handPoseDetection.Hand): string => {
+  const kp = hand.keypoints;
+  if (!kp || kp.length < 21) return 'unknown';
+  const dist = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+    Math.hypot(a.x - b.x, a.y - b.y);
+  const extended = (tip: number, pip: number) => dist(kp[tip], kp[0]) > dist(kp[pip], kp[0]) * 1.1;
+  const index = extended(8, 6);
+  const middle = extended(12, 10);
+  const ring = extended(16, 14);
+  const pinky = extended(20, 18);
+  const thumbTip = kp[4];
+  const indexTip = kp[8];
+  const pinch = dist(thumbTip, indexTip) < dist(kp[5], kp[17]) * 0.4;
+
+  if (pinch && index && middle && !ring && !pinky) return 'Pinch';
+  if (index && middle && !ring && !pinky) return 'Peace';
+  if (index && !middle && !ring && !pinky) return 'Pointing';
+  if (index && middle && ring && pinky && extended(4, 2)) return 'Open Hand';
+  if (!index && !middle && !ring && !pinky) return 'Fist';
+  return 'unknown';
+};
+
+// ---- Web Speech API (browser-native real transcription) ----
+interface SpeechRecognitionResultLike {
+  0: { transcript: string };
+  isFinal: boolean;
+  length: number;
+}
+interface SpeechRecognitionEventLike {
+  resultIndex: number;
+  results: { length: number; [i: number]: SpeechRecognitionResultLike };
+}
+interface SpeechRecognitionLike {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start: () => void;
+  stop: () => void;
+  onresult: ((e: SpeechRecognitionEventLike) => void) | null;
+  onend: (() => void) | null;
+  onerror: ((e: unknown) => void) | null;
+}
+type SpeechRecognitionCtor = new () => SpeechRecognitionLike;
+
+const getSpeechRecognitionCtor = (): SpeechRecognitionCtor | null => {
+  const w = window as unknown as {
+    SpeechRecognition?: SpeechRecognitionCtor;
+    webkitSpeechRecognition?: SpeechRecognitionCtor;
+  };
+  return w.SpeechRecognition || w.webkitSpeechRecognition || null;
 };
 
 export const useAIFeatures = () => {
-  const [features, setFeatures] = useState<AIFeatures>({
-    // Face & Pose Features
-    faceDetection: { enabled: false, sensitivity: 0.5 },
-    facialLandmarks: { enabled: false, sensitivity: 0.5 },
-    poseEstimation: { enabled: false, sensitivity: 0.5 },
-    handPoseEstimation: { enabled: false, sensitivity: 0.5 },
-    
-    // Background Modifications
-    backgroundRemoval: { enabled: false, sensitivity: 0.5 },
-    backgroundBlur: { enabled: false, sensitivity: 0.5 },
-    
-    // Analysis Features
-    speechRecognition: { enabled: false, sensitivity: 0.5 },
-    sentimentAnalysis: { enabled: false, sensitivity: 0.5 },
-    gestureRecognition: { enabled: false, sensitivity: 0.5 },
-    expressionDetection: { enabled: false, sensitivity: 0.5 },
-    sceneDetection: { enabled: false, sensitivity: 0.5 },
-    sceneSegmentation: { enabled: false, sensitivity: 0.5 },
-    
-    // Enhancement Features
-    beautification: { enabled: false, sensitivity: 0.5 },
-    superResolution: { enabled: false, sensitivity: 0.5 },
-    styleTransfer: { enabled: false, sensitivity: 0.5 },
-    autoFraming: { enabled: false, sensitivity: 0.5 },
-    enhancedLighting: { enabled: false, sensitivity: 0.5 },
-    colorEnhancement: { enabled: false, sensitivity: 0.5 },
-    
-    // Correction Features
-    stabilization: { enabled: false, sensitivity: 0.5 },
-    noiseReduction: { enabled: false, sensitivity: 0.5 },
-    denoising: { enabled: false, sensitivity: 0.5 },
-    autoExposure: { enabled: false, sensitivity: 0.5 }
-  });
-
-  const [models, setModels] = useState<Models>({});
+  const [features, setFeatures] = useState<AIFeatures>(createDefaultFeatures());
   const [isModelsLoaded, setIsModelsLoaded] = useState(false);
   const [isModelsLoading, setIsModelsLoading] = useState(false);
   const [activeModels, setActiveModels] = useState<string[]>([]);
   const [processingQuality, setProcessingQuality] = useState<'low' | 'medium' | 'high'>('medium');
+  const [transcript, setTranscript] = useState<string>('');
+  const [sceneCuts, setSceneCuts] = useState<number[]>([]);
 
-  // Keep track of which models have been loaded
   const loadedModelTypes = useRef<Set<string>>(new Set());
-
-  // Mirrors of the state used by async/long-lived callbacks so that
-  // `loadModels` stays referentially stable and never reloads on every render.
   const modelsRef = useRef<Models>({});
   const featuresRef = useRef(features);
   const processingQualityRef = useRef(processingQuality);
   const isLoadingRef = useRef(false);
+
+  // Persistent analysis state across frames.
+  const stabilizer = useRef(new FrameStabilizer());
+  const prevGray = useRef<{ w: number; h: number; data: Uint8Array } | null>(null);
+  const estMotion = useRef({ x: 0, y: 0 });
+  const prevFrameImage = useRef<ImageData | null>(null);
+  const viewRect = useRef<Rect | null>(null);
+  const frameCount = useRef(0);
+  const lastHist = useRef<number[] | null>(null);
+  const lastFaces = useRef<blazeface.NormalizedFace[]>([]);
+  const lastFaceMeshes = useRef<faceLandmarksDetection.Face[]>([]);
+  const lastHands = useRef<handPoseDetection.Hand[]>([]);
+  const lastPoses = useRef<poseDetection.Pose[]>([]);
+  const speechRef = useRef<SpeechRecognitionLike | null>(null);
+  const speechRestart = useRef(false);
 
   useEffect(() => {
     featuresRef.current = features;
@@ -123,101 +236,56 @@ export const useAIFeatures = () => {
     processingQualityRef.current = processingQuality;
   }, [processingQuality]);
 
-  // Reusable offscreen canvases - allocating one per frame trashes memory
-  // and the GC during continuous processing.
-  const scratchCanvases = useRef<Map<string, HTMLCanvasElement>>(new Map());
-  const getScratchCanvas = useCallback((key: string, width: number, height: number) => {
-    let canvas = scratchCanvases.current.get(key);
-    if (!canvas) {
-      canvas = document.createElement('canvas');
-      scratchCanvases.current.set(key, canvas);
-    }
-    if (canvas.width !== width || canvas.height !== height) {
-      canvas.width = width;
-      canvas.height = height;
-    }
-    return canvas;
-  }, []);
-
-  // Performance monitoring
   const fpsCounter = useRef({ frames: 0, lastTime: 0, fps: 0 });
   const updateFPS = useCallback(() => {
     const now = performance.now();
-
-    // First sample: only prime the counter, an "elapsed since epoch" reading
-    // would otherwise immediately force the quality down to 'low'.
     if (fpsCounter.current.lastTime === 0) {
       fpsCounter.current.lastTime = now;
       fpsCounter.current.frames = 1;
       return;
     }
-
     const elapsed = now - fpsCounter.current.lastTime;
-
-    if (elapsed >= 1000) { // Update every second
-      fpsCounter.current.fps = fpsCounter.current.frames * (1000 / elapsed);
+    if (elapsed >= 1000) {
+      fpsCounter.current.fps = (fpsCounter.current.frames * 1000) / elapsed;
       fpsCounter.current.frames = 0;
       fpsCounter.current.lastTime = now;
-
-      // Auto-adjust quality based on FPS
       if (fpsCounter.current.fps < 15 && processingQualityRef.current !== 'low') {
         setProcessingQuality('low');
       } else if (fpsCounter.current.fps > 25 && processingQualityRef.current === 'low') {
         setProcessingQuality('medium');
       }
     }
-
     fpsCounter.current.frames++;
   }, []);
 
-  // Load TensorFlow.js and prepare backend
   useEffect(() => {
     let cancelled = false;
-
     const initTensorFlow = async () => {
       try {
         await tf.ready();
         if (cancelled) return;
-
-        const backend = tf.getBackend();
-        console.log(`TensorFlow.js initialized with backend: ${backend}`);
-
-        // Try to use WebGL if available for better performance
-        if (backend !== 'webgl') {
+        if (tf.getBackend() !== 'webgl') {
           try {
             const switched = await tf.setBackend('webgl');
-            if (switched) {
-              await tf.ready();
-              console.log('Switched to WebGL backend');
-            }
-          } catch (backendError) {
-            console.warn('WebGL backend unavailable, staying on', backend, backendError);
+            if (switched) await tf.ready();
+          } catch {
+            /* keep current backend */
           }
         }
-
-        // Configure memory management
         if (tf.getBackend() === 'webgl') {
           tf.env().set('WEBGL_DELETE_TEXTURE_THRESHOLD', 0);
-          console.log('Configured aggressive texture cleanup');
         }
-
       } catch (err) {
         console.error('Failed to initialize TensorFlow.js:', err);
       }
     };
-
     initTensorFlow();
-
     return () => {
       cancelled = true;
     };
   }, []);
 
-  // Release model + canvas resources when the hook is unmounted. `tf.disposeVariables()`
-  // is intentionally NOT used here: it is global and would break any other model
-  // still alive in the app.
   useEffect(() => {
-    const canvases = scratchCanvases.current;
     return () => {
       const loaded = modelsRef.current;
       (Object.keys(loaded) as (keyof Models)[]).forEach(key => {
@@ -229,111 +297,96 @@ export const useAIFeatures = () => {
       });
       modelsRef.current = {};
       loadedModelTypes.current = new Set();
-      canvases.clear();
+      speechRef.current?.stop();
+      speechRef.current = null;
     };
   }, []);
 
   const loadModels = useCallback(async () => {
-    // Guard against concurrent loads: `isModelsLoading` state lags behind and
-    // would let two effect runs download the same model twice.
     if (isLoadingRef.current) return;
     isLoadingRef.current = true;
 
     try {
       setIsModelsLoading(true);
-      
-      // Make sure TensorFlow is ready
       await tf.ready();
-      
-      console.log('TensorFlow.js ready, backend:', tf.getBackend());
-      
-      const features = featuresRef.current;
+
+      const f = featuresRef.current;
       const processingQuality = processingQualityRef.current;
       const loadedModels: Models = {};
       const newModelsLoaded = new Set(loadedModelTypes.current);
-      
-      // Determine which models need to be loaded based on enabled features
-      const needFaceDetection = features.faceDetection.enabled ||
-                               features.facialLandmarks.enabled ||
-                               features.expressionDetection.enabled ||
-                               features.beautification.enabled;
-      
-      const needFaceLandmarks = features.facialLandmarks.enabled ||
-                               features.expressionDetection.enabled ||
-                               features.beautification.enabled;
-      
-      const needBodySegmentation = features.backgroundRemoval.enabled ||
-                                  features.backgroundBlur.enabled ||
-                                  features.poseEstimation.enabled ||
-                                  features.sceneSegmentation.enabled;
-      
-      const needHandPose = features.handPoseEstimation.enabled ||
-                          features.gestureRecognition.enabled;
-      
-      // Update feature loading status
-      const updateFeatureStatus = (featureId: string, status: 'loading' | 'loaded' | 'error', errorMsg?: string) => {
+
+      const needFaceDetection = f.faceDetection.enabled || f.facialLandmarks.enabled ||
+        f.expressionDetection.enabled || f.beautification.enabled;
+      const needFaceLandmarks = f.facialLandmarks.enabled || f.expressionDetection.enabled || f.beautification.enabled;
+      const needBodySegmentation = f.backgroundRemoval.enabled || f.backgroundBlur.enabled;
+      const needHandPose = f.handPoseEstimation.enabled || f.gestureRecognition.enabled;
+      const needPose = f.poseEstimation.enabled;
+
+      const update = (id: string, status: 'loading' | 'loaded' | 'error', err?: string) => {
         setFeatures(prev => ({
           ...prev,
-          [featureId]: {
-            ...prev[featureId],
-            loading: status === 'loading',
-            loaded: status === 'loaded',
-            error: status === 'error' ? errorMsg : undefined
-          }
+          [id]: { ...prev[id], loading: status === 'loading', loaded: status === 'loaded', error: status === 'error' ? err : undefined }
         }));
       };
-      
-      // Load face detection model if needed
+
       if (needFaceDetection && !loadedModelTypes.current.has('faceDetection')) {
-        console.log('Loading face detection model...');
-        updateFeatureStatus('faceDetection', 'loading');
-        
+        update('faceDetection', 'loading');
         try {
           loadedModels.faceDetection = await blazeface.load({
             maxFaces: 10,
-            inputWidth: processingQuality === 'low' ? 128 : 224,
-            inputHeight: processingQuality === 'low' ? 128 : 224,
+            inputWidth: 224,
+            inputHeight: 224,
             iouThreshold: 0.3,
-            scoreThreshold: features.faceDetection.sensitivity
+            scoreThreshold: f.faceDetection.sensitivity
           });
           newModelsLoaded.add('faceDetection');
-          updateFeatureStatus('faceDetection', 'loaded');
-          console.log('Face detection model loaded successfully');
-        } catch (error) {
-          console.error('Failed to load face detection model:', error);
-          updateFeatureStatus('faceDetection', 'error', 'Failed to load face detection model');
+          update('faceDetection', 'loaded');
+        } catch (e) {
+          update('faceDetection', 'error', 'Failed to load face detection model');
         }
       }
 
-      // Load facial landmarks detection if needed
-      if (needFaceLandmarks && !loadedModelTypes.current.has('facialLandmarks')) {
-        console.log('Loading facial landmarks model...');
-        updateFeatureStatus('facialLandmarks', 'loading');
-        
+      if (needFaceLandmarks && !loadedModelTypes.current.has('faceLandmarks')) {
+        update('faceLandmarks', 'loading');
         try {
           loadedModels.faceLandmarks = await faceLandmarksDetection.createDetector(
             faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
             {
               runtime: 'tfjs',
               refineLandmarks: processingQuality !== 'low',
-              maxFaces: processingQuality === 'low' ? 1 : (processingQuality === 'medium' ? 2 : 5)
+              maxFaces: processingQuality === 'low' ? 1 : processingQuality === 'medium' ? 2 : 5
             }
           );
-          newModelsLoaded.add('facialLandmarks');
-          updateFeatureStatus('facialLandmarks', 'loaded');
-          console.log('Facial landmarks model loaded successfully');
-        } catch (error) {
-          console.error('Failed to load facial landmarks model:', error);
-          updateFeatureStatus('facialLandmarks', 'error', 'Failed to load facial landmarks model');
+          newModelsLoaded.add('faceLandmarks');
+          update('faceLandmarks', 'loaded');
+        } catch (e) {
+          update('faceLandmarks', 'error', 'Failed to load facial landmarks model');
         }
       }
 
-      // Load hand pose detection if needed
+      if (needBodySegmentation && !loadedModelTypes.current.has('bodySegmentation')) {
+        update('backgroundRemoval', 'loading');
+        update('backgroundBlur', 'loading');
+        try {
+          loadedModels.bodySegmentation = await bodySegmentation.createSegmenter(
+            SupportedModels.MediaPipeSelfieSegmentation,
+            {
+              runtime: 'tfjs',
+              modelType: processingQuality === 'low' ? 'landscape' : 'general'
+            }
+          );
+          newModelsLoaded.add('bodySegmentation');
+          update('backgroundRemoval', 'loaded');
+          update('backgroundBlur', 'loaded');
+        } catch (e) {
+          update('backgroundRemoval', 'error', 'Failed to load body segmentation model');
+          update('backgroundBlur', 'error', 'Failed to load body segmentation model');
+        }
+      }
+
       if (needHandPose && !loadedModelTypes.current.has('handPose')) {
-        console.log('Loading hand pose model...');
-        updateFeatureStatus('handPoseEstimation', 'loading');
-        updateFeatureStatus('gestureRecognition', 'loading');
-        
+        update('handPoseEstimation', 'loading');
+        update('gestureRecognition', 'loading');
         try {
           loadedModels.handPose = await handPoseDetection.createDetector(
             handPoseDetection.SupportedModels.MediaPipeHands,
@@ -344,54 +397,36 @@ export const useAIFeatures = () => {
             }
           );
           newModelsLoaded.add('handPose');
-          updateFeatureStatus('handPoseEstimation', 'loaded');
-          updateFeatureStatus('gestureRecognition', 'loaded');
-          console.log('Hand pose model loaded successfully');
-        } catch (error) {
-          console.error('Failed to load hand pose model:', error);
-          updateFeatureStatus('handPoseEstimation', 'error', 'Failed to load hand pose model');
-          updateFeatureStatus('gestureRecognition', 'error', 'Failed to load hand pose model');
+          update('handPoseEstimation', 'loaded');
+          update('gestureRecognition', 'loaded');
+        } catch (e) {
+          update('handPoseEstimation', 'error', 'Failed to load hand pose model');
+          update('gestureRecognition', 'error', 'Failed to load hand pose model');
         }
       }
 
-      // Load body segmentation if needed
-      if (needBodySegmentation && !loadedModelTypes.current.has('bodySegmentation')) {
-        console.log('Loading body segmentation model...');
-        updateFeatureStatus('backgroundRemoval', 'loading');
-        updateFeatureStatus('backgroundBlur', 'loading');
-        updateFeatureStatus('poseEstimation', 'loading');
-        
+      if (needPose && !loadedModelTypes.current.has('pose')) {
+        update('poseEstimation', 'loading');
         try {
-          loadedModels.bodySegmentation = await bodySegmentation.createSegmenter(
-            SupportedModels.MediaPipeSelfieSegmentation,
-            {
-              runtime: 'tfjs',
-              modelType: processingQuality === 'low' ? 'landscape' : 'general'
-            }
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const poseConfig: any = {
+            runtime: 'tfjs',
+            modelType: processingQuality === 'high' ? 'SINGLEPOSE_LIGHTNING' : 'SINGLEPOSE_THUNDER'
+          };
+          loadedModels.pose = await poseDetection.createDetector(
+            poseDetection.SupportedModels.MoveNet,
+            poseConfig
           );
-          newModelsLoaded.add('bodySegmentation');
-          updateFeatureStatus('backgroundRemoval', 'loaded');
-          updateFeatureStatus('backgroundBlur', 'loaded');
-          updateFeatureStatus('poseEstimation', 'loaded');
-          console.log('Body segmentation model loaded successfully');
-        } catch (error) {
-          console.error('Failed to load body segmentation model:', error);
-          updateFeatureStatus('backgroundRemoval', 'error', 'Failed to load body segmentation model');
-          updateFeatureStatus('backgroundBlur', 'error', 'Failed to load body segmentation model');
-          updateFeatureStatus('poseEstimation', 'error', 'Failed to load body segmentation model');
+          newModelsLoaded.add('pose');
+          update('poseEstimation', 'loaded');
+        } catch (e) {
+          update('poseEstimation', 'error', 'Failed to load pose model');
         }
       }
 
-      // Update loaded model types
       loadedModelTypes.current = newModelsLoaded;
-      
-      // Keep the previously loaded models around - a failed/skipped load must
-      // never drop a model that is already in use.
       modelsRef.current = { ...modelsRef.current, ...loadedModels };
-
-      setModels(modelsRef.current);
       setIsModelsLoaded(Object.keys(modelsRef.current).length > 0);
-      console.log('AI models loaded successfully');
     } catch (error) {
       console.error('Failed to initialize TensorFlow:', error);
     } finally {
@@ -400,780 +435,562 @@ export const useAIFeatures = () => {
     }
   }, []);
 
-  // Update active models when features change
   useEffect(() => {
     const active = Object.entries(features)
-      .filter(entry => entry[1].enabled)
-      .map(([key]) => key);
-    
+      .filter(([, v]) => v.enabled)
+      .map(([k]) => k);
     setActiveModels(active);
-    
-    // Check if we need to load models based on enabled features
+
     const needModelLoading = active.some(feature => {
-      switch(feature) {
+      switch (feature) {
         case 'faceDetection':
         case 'facialLandmarks':
         case 'expressionDetection':
         case 'beautification':
-          return !loadedModelTypes.current.has('faceDetection') || 
-                 !loadedModelTypes.current.has('facialLandmarks');
-          
+          return !loadedModelTypes.current.has('faceDetection') || !loadedModelTypes.current.has('faceLandmarks');
         case 'handPoseEstimation':
         case 'gestureRecognition':
           return !loadedModelTypes.current.has('handPose');
-          
         case 'backgroundRemoval':
         case 'backgroundBlur':
-        case 'poseEstimation':
-        case 'sceneSegmentation':
           return !loadedModelTypes.current.has('bodySegmentation');
-          
+        case 'poseEstimation':
+          return !loadedModelTypes.current.has('pose');
         default:
           return false;
       }
     });
-    
+
     if (needModelLoading && !isLoadingRef.current) {
       loadModels();
     }
   }, [features, loadModels]);
 
+  // ---- Speech recognition lifecycle ----
+  useEffect(() => {
+    const enabled = featuresRef.current.speechRecognition.enabled;
+    const Ctor = getSpeechRecognitionCtor();
+    if (enabled && Ctor && !speechRef.current) {
+      try {
+        const rec = new Ctor();
+        rec.continuous = true;
+        rec.interimResults = true;
+        rec.lang = 'en-US';
+        rec.onresult = (e: SpeechRecognitionEventLike) => {
+          let finalText = '';
+          let interim = '';
+          for (let i = e.resultIndex; i < e.results.length; i++) {
+            const res = e.results[i];
+            if (res.isFinal) finalText += res[0].transcript;
+            else interim += res[0].transcript;
+          }
+          setTranscript(prev => (finalText ? prev + finalText : prev) + (interim ? '' : ''));
+          if (interim) setTranscript(prev => (prev.endsWith(interim) ? prev : prev + interim));
+        };
+        rec.onend = () => {
+          if (speechRestart.current) {
+            speechRestart.current = false;
+            try {
+              rec.start();
+            } catch {
+              /* will retry on next toggle */
+            }
+          }
+        };
+        rec.onerror = () => {
+          speechRestart.current = true;
+        };
+        speechRef.current = rec;
+        speechRestart.current = true;
+        try {
+          rec.start();
+        } catch {
+          /* ignore double-start */
+        }
+      } catch {
+        setFeatures(prev => ({
+          ...prev,
+          speechRecognition: { ...prev.speechRecognition, error: 'Speech recognition not supported' }
+        }));
+      }
+    }
+    if (!enabled && speechRef.current) {
+      speechRestart.current = false;
+      try {
+        speechRef.current.stop();
+      } catch {
+        /* ignore */
+      }
+      speechRef.current = null;
+      setTranscript('');
+    }
+  }, [features.speechRecognition.enabled]);
+
   const toggleFeature = useCallback((featureId: string) => {
     setFeatures(prev => {
-      // Special handling for dependencies
       const newFeatures = { ...prev };
-      
-      // Handle dependencies between features
       if (featureId === 'facialLandmarks' && !prev.faceDetection.enabled && !prev.facialLandmarks.enabled) {
         newFeatures.faceDetection = { ...prev.faceDetection, enabled: true };
       }
-      
       if (featureId === 'expressionDetection' && !prev.facialLandmarks.enabled && !prev.expressionDetection.enabled) {
         newFeatures.facialLandmarks = { ...prev.facialLandmarks, enabled: true };
-        if (!prev.faceDetection.enabled) {
-          newFeatures.faceDetection = { ...prev.faceDetection, enabled: true };
-        }
+        if (!prev.faceDetection.enabled) newFeatures.faceDetection = { ...prev.faceDetection, enabled: true };
       }
-      
       if (featureId === 'gestureRecognition' && !prev.handPoseEstimation.enabled && !prev.gestureRecognition.enabled) {
         newFeatures.handPoseEstimation = { ...prev.handPoseEstimation, enabled: true };
       }
-      
-      // Toggle the requested feature
-      newFeatures[featureId] = {
-        ...prev[featureId],
-        enabled: !prev[featureId].enabled
-      };
-      
+      newFeatures[featureId] = { ...prev[featureId], enabled: !prev[featureId].enabled };
       return newFeatures;
     });
   }, []);
 
   const updateFeatureSettings = useCallback((featureId: string, settings: Partial<AIFeature>) => {
-    setFeatures(prev => ({
-      ...prev,
-      [featureId]: {
-        ...prev[featureId],
-        ...settings
-      }
-    }));
+    setFeatures(prev => ({ ...prev, [featureId]: { ...prev[featureId], ...settings } }));
   }, []);
 
-  // Apply visual effects to canvas
-  const applyVisualEffects = useCallback((
-    ctx: CanvasRenderingContext2D, 
-    videoElement: HTMLVideoElement,
-    effects: {
-      brightness?: number;
-      contrast?: number;
-      saturation?: number;
-      blur?: number;
-      sharpness?: number;
-      exposure?: number;
-      temperature?: number;
-      vignette?: number;
-      grain?: number;
-    }
-  ) => {
-    // Apply filters based on enabled effects
-    const filters = [];
-    
-    if (effects.brightness !== undefined && effects.brightness !== 1) {
-      filters.push(`brightness(${effects.brightness})`);
-    }
-    
-    if (effects.contrast !== undefined && effects.contrast !== 1) {
-      filters.push(`contrast(${effects.contrast})`);
-    }
-    
-    if (effects.saturation !== undefined && effects.saturation !== 1) {
-      filters.push(`saturate(${effects.saturation})`);
-    }
-    
-    if (effects.blur !== undefined && effects.blur > 0) {
-      filters.push(`blur(${effects.blur}px)`);
-    }
-    
-    if (filters.length > 0) {
-      ctx.filter = filters.join(' ');
-    }
-    
-    // Draw the video frame
-    ctx.drawImage(videoElement, 0, 0);
-    
-    // Reset filters
-    if (filters.length > 0) {
-      ctx.filter = 'none';
-    }
-    
-    // Apply effects that can't be done with CSS filters
-    if (effects.vignette !== undefined && effects.vignette > 0) {
-      const centerX = ctx.canvas.width / 2;
-      const centerY = ctx.canvas.height / 2;
-      const radius = Math.max(ctx.canvas.width, ctx.canvas.height) / 2;
-      
-      // Create radial gradient for vignette
-      const gradient = ctx.createRadialGradient(
-        centerX, centerY, radius * 0.5,
-        centerX, centerY, radius
-      );
-      
-      gradient.addColorStop(0, 'rgba(0,0,0,0)');
-      gradient.addColorStop(1, `rgba(0,0,0,${effects.vignette})`);
-      
-      ctx.fillStyle = gradient;
-      ctx.globalCompositeOperation = 'multiply';
-      ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-      ctx.globalCompositeOperation = 'source-over';
-    }
-    
-    // Apply film grain if enabled
-    if (effects.grain !== undefined && effects.grain > 0) {
-      // Use a smaller, reused canvas for performance
-      const grainCanvas = getScratchCanvas(
-        'grain',
-        Math.max(1, Math.floor(ctx.canvas.width / 4)),
-        Math.max(1, Math.floor(ctx.canvas.height / 4))
-      );
-      const grainCtx = grainCanvas.getContext('2d');
-      
-      if (grainCtx) {
-        const grainData = grainCtx.createImageData(grainCanvas.width, grainCanvas.height);
-        const intensity = effects.grain * 255;
-        
-        for (let i = 0; i < grainData.data.length; i += 4) {
-          const value = Math.random() * intensity - intensity / 2;
-          grainData.data[i] = value;
-          grainData.data[i+1] = value;
-          grainData.data[i+2] = value;
-          grainData.data[i+3] = 40; // Semi-transparent grain
+  const processFrame = useCallback(
+    async (videoElement: HTMLVideoElement, canvasElement: HTMLCanvasElement) => {
+      const f = featuresRef.current;
+      const m = modelsRef.current;
+
+      if (videoElement.readyState < 2 || !videoElement.videoWidth || !videoElement.videoHeight) {
+        return;
+      }
+
+      const ctx = canvasElement.getContext('2d', { willReadFrequently: true });
+      if (!ctx) return;
+
+      const W = videoElement.videoWidth;
+      const H = videoElement.videoHeight;
+      if (canvasElement.width !== W || canvasElement.height !== H) {
+        canvasElement.width = W;
+        canvasElement.height = H;
+      }
+
+      updateFPS();
+
+      const needsAI = Object.values(f).some(v => v.enabled);
+      if (!needsAI) {
+        // No AI feature: just mirror the source so the overlay is correct.
+        ctx.clearRect(0, 0, W, H);
+        ctx.drawImage(videoElement, 0, 0);
+        return;
+      }
+
+      const quality = processingQualityRef.current;
+      const detectEvery = quality === 'low' ? 4 : quality === 'high' ? 1 : 2;
+
+      // Scale at which heavy models run (smaller = faster).
+      const scale = quality === 'low' ? 0.4 : quality === 'medium' ? 0.6 : 0.75;
+      const aw = Math.max(1, Math.round(W * scale));
+      const ah = Math.max(1, Math.round(H * scale));
+      const analysisCanvas = getScratchCanvas('analysis', aw, ah);
+      const aCtx = analysisCanvas.getContext('2d');
+      if (!aCtx) return;
+      aCtx.drawImage(videoElement, 0, 0, aw, ah);
+
+      frameCount.current++;
+
+      // ---- Geometric corrections (view rect) ----
+      let view: Rect = { x: 0, y: 0, w: W, h: H };
+
+      // Stabilization: estimate motion on the analysis frame.
+      if (f.stabilization.enabled) {
+        const gray = toGrayscale(analysisCanvas, aw, ah);
+        if (prevGray.current && prevGray.current.w === aw && prevGray.current.h === ah) {
+          const measured = estimateTranslation(gray, prevGray.current.data, aw, ah, 6, estMotion.current);
+          estMotion.current = measured;
+          const corr = stabilizer.current.update(measured, W, H, f.stabilization.sensitivity, 0.85);
+          view.x = clamp(view.x + corr.dx, 0, W);
+          view.y = clamp(view.y + corr.dy, 0, H);
         }
-        
-        grainCtx.putImageData(grainData, 0, 0);
-        ctx.globalCompositeOperation = 'overlay';
-        ctx.globalAlpha = effects.grain;
-        ctx.drawImage(grainCanvas, 0, 0, ctx.canvas.width, ctx.canvas.height);
-        ctx.globalAlpha = 1;
-        ctx.globalCompositeOperation = 'source-over';
+        prevGray.current = { w: aw, h: ah, data: gray };
+      } else {
+        prevGray.current = null;
+        stabilizer.current.reset(W, H);
       }
-    }
-  }, [getScratchCanvas]);
 
-  // Process a video frame with all enabled AI features
-  const processFrame = useCallback(async (
-    videoElement: HTMLVideoElement,
-    canvasElement: HTMLCanvasElement
-  ) => {
-    if (!isModelsLoaded) return;
-
-    // The video may not have decoded a frame yet - `videoWidth === 0` makes
-    // both drawImage and tf.browser.fromPixels throw.
-    if (videoElement.readyState < 2 || !videoElement.videoWidth || !videoElement.videoHeight) {
-      return;
-    }
-
-    updateFPS();
-
-    const ctx = canvasElement.getContext('2d', { willReadFrequently: true });
-    if (!ctx) return;
-
-    // Match canvas size to video
-    if (canvasElement.width !== videoElement.videoWidth || 
-        canvasElement.height !== videoElement.videoHeight) {
-      canvasElement.width = videoElement.videoWidth;
-      canvasElement.height = videoElement.videoHeight;
-    }
-
-    // Draw original frame
-    ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-    ctx.drawImage(videoElement, 0, 0);
-
-    // Process with TensorFlow models if any feature is enabled
-    const needsAIProcessing = Object.values(features).some(f => f.enabled);
-    
-    if (!needsAIProcessing) {
-      return; // Skip AI processing if no features are enabled
-    }
-
-    // Created below - kept outside the try so the `finally` block can always
-    // dispose it, including on early returns/exceptions.
-    let inputTensor: tf.Tensor3D | null = null;
-
-    try {
-      // Create a tensor from the video frame (at reduced size for performance if needed)
-      let processScale = 1;
-      
-      if (processingQuality === 'low') {
-        processScale = 0.5; // Process at half resolution for performance
-      } else if (processingQuality === 'medium') {
-        processScale = 0.75;
+      // Auto-framing: track faces (or fall back to motion saliency).
+      if (f.autoFraming.enabled && m.faceDetection) {
+        let faces = lastFaces.current;
+        if (frameCount.current % detectEvery === 0) {
+          faces = await m.faceDetection.estimateFaces(analysisCanvas, false);
+          lastFaces.current = faces;
+        }
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const p of faces) {
+          const s = toPoint(p.topLeft);
+          const e = toPoint(p.bottomRight);
+          if (!s || !e) continue;
+          minX = Math.min(minX, s[0] / scale);
+          minY = Math.min(minY, s[1] / scale);
+          maxX = Math.max(maxX, e[0] / scale);
+          maxY = Math.max(maxY, e[1] / scale);
+        }
+        if (!Number.isFinite(minX)) {
+          // Fallback: use motion saliency from the grayscale diff.
+          if (prevGray.current) {
+            const gray = toGrayscale(analysisCanvas, aw, ah);
+            let bx = 0, by = 0, bn = 0;
+            for (let y = 0; y < ah; y += 4) {
+              for (let x = 0; x < aw; x += 4) {
+                const idx = y * aw + x;
+                if (Math.abs(gray[idx] - prevGray.current.data[idx]) > 25) {
+                  bx += x / scale;
+                  by += y / scale;
+                  bn++;
+                }
+              }
+            }
+            if (bn > 0) {
+              minX = bx / bn - W * 0.1;
+              minY = by / bn - H * 0.1;
+              maxX = bx / bn + W * 0.1;
+              maxY = by / bn + H * 0.1;
+            }
+          }
+        }
+        if (Number.isFinite(minX)) {
+          const padX = (maxX - minX) * 0.4 + W * 0.05;
+          const padY = (maxY - minY) * 0.4 + H * 0.05;
+          const rx = minX - padX;
+          const ry = minY - padY;
+          let rw = maxX - minX + padX * 2;
+          let rh = maxY - minY + padY * 2;
+          // Preserve output aspect ratio.
+          const outRatio = W / H;
+          if (rw / rh > outRatio) rh = rw / outRatio;
+          else rw = rh * outRatio;
+          const alpha = quality === 'high' ? 0.25 : 0.12;
+          if (!viewRect.current) viewRect.current = { x: rx, y: ry, w: rw, h: rh };
+          else viewRect.current = {
+            x: viewRect.current.x + (rx - viewRect.current.x) * alpha,
+            y: viewRect.current.y + (ry - viewRect.current.y) * alpha,
+            w: viewRect.current.w + (rw - viewRect.current.w) * alpha,
+            h: viewRect.current.h + (rh - viewRect.current.h) * alpha
+          };
+          const vr = viewRect.current;
+          vr.w = Math.max(W * 0.3, Math.min(W * 1.5, vr.w));
+          vr.h = vr.w / outRatio;
+          vr.x = clamp(vr.x, 0, Math.max(0, W - vr.w));
+          vr.y = clamp(vr.y, 0, Math.max(0, H - vr.h));
+          view = vr;
+        }
       }
-      
-      if (processScale !== 1) {
-        const inputCanvas = getScratchCanvas(
-          'input',
-          Math.max(1, Math.round(videoElement.videoWidth * processScale)),
-          Math.max(1, Math.round(videoElement.videoHeight * processScale))
-        );
-        const inputCtx = inputCanvas.getContext('2d');
-        if (inputCtx) {
-          inputCtx.drawImage(videoElement, 0, 0, inputCanvas.width, inputCanvas.height);
-          inputTensor = tf.browser.fromPixels(inputCanvas);
-        } else {
-          // Fall back to full resolution - the scale must be reset as well or
-          // every detection would be drawn at the wrong coordinates.
-          processScale = 1;
-          inputTensor = tf.browser.fromPixels(videoElement);
+
+      // ---- Base render of the (view-rect) source ----
+      ctx.clearRect(0, 0, W, H);
+      ctx.filter = 'none';
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.drawImage(
+        videoElement,
+        view.x, view.y, view.w, view.h,
+        0, 0, W, H
+      );
+
+      // ---- Tonal / colour corrections (real pixel math) ----
+      const workCanvas = getScratchCanvas('work', W, H);
+      const wCtx = workCanvas.getContext('2d', { willReadFrequently: true });
+      if (!wCtx) return;
+      wCtx.clearRect(0, 0, W, H);
+      wCtx.drawImage(videoElement, view.x, view.y, view.w, view.h, 0, 0, W, H);
+      const stats = computeFrameStats(workCanvas, W, H);
+      const exGain = f.autoExposure.enabled ? clamp(128 / (stats.mean || 1), 0.7, 1.6) : 1;
+      const lutR = f.colorEnhancement.enabled || f.enhancedLighting.enabled || f.autoExposure.enabled
+        ? buildToneLUT(
+            f.autoExposure.enabled ? lerp(1, exGain, f.autoExposure.sensitivity) : 1,
+            f.enhancedLighting.enabled ? stats.blackPoint : 0,
+            f.enhancedLighting.enabled ? stats.whitePoint : 255,
+            f.enhancedLighting.enabled ? lerp(1, stats.gamma, f.enhancedLighting.sensitivity) : 1
+          )
+        : new Uint8ClampedArray(Array.from({ length: 256 }, (_, i) => i));
+
+      const gainR = f.colorEnhancement.enabled ? clamp((stats.mean / (stats.meanR || 1)), 0.8, 1.25) : 1;
+      const gainG = f.colorEnhancement.enabled ? clamp((stats.mean / (stats.meanG || 1)), 0.8, 1.25) : 1;
+      const gainB = f.colorEnhancement.enabled ? clamp((stats.mean / (stats.meanB || 1)), 0.8, 1.25) : 1;
+      const lutRc = f.colorEnhancement.enabled ? buildToneLUT(gainR, 0, 255, 1) : lutR;
+      const lutGc = f.colorEnhancement.enabled ? buildToneLUT(gainG, 0, 255, 1) : lutR;
+      const lutBc = f.colorEnhancement.enabled ? buildToneLUT(gainB, 0, 255, 1) : lutR;
+      const sat = f.colorEnhancement.enabled ? lerp(0, 0.5, f.colorEnhancement.sensitivity) : 0;
+
+      const toneCanvas = getScratchCanvas('tone', W, H);
+      const tCtx = toneCanvas.getContext('2d', { willReadFrequently: true });
+      if (!tCtx) return;
+      tCtx.drawImage(workCanvas, 0, 0);
+      applyToneAndColor(toneCanvas, W, H, lutRc, lutGc, lutBc, sat);
+
+      // ---- Denoising (temporal + optional spatial) ----
+      if (f.denoising.enabled) {
+        const img = tCtx.getImageData(0, 0, W, H);
+        temporalDenoise(img, prevFrameImage.current, f.denoising.sensitivity);
+        tCtx.putImageData(img, 0, 0);
+        prevFrameImage.current = tCtx.getImageData(0, 0, W, H);
+        if (quality === 'high' && W * H < 900000) {
+          spatialDenoise(toneCanvas, W, H, f.denoising.sensitivity * 0.8);
         }
       } else {
-        inputTensor = tf.browser.fromPixels(videoElement);
+        prevFrameImage.current = null;
       }
 
-      // Apply features that affect the whole image
-      if (features.colorEnhancement.enabled) {
-        applyVisualEffects(ctx, videoElement, {
-          brightness: 1 + features.colorEnhancement.sensitivity * 0.2,
-          contrast: 1 + features.colorEnhancement.sensitivity * 0.2,
-          saturation: 1 + features.colorEnhancement.sensitivity * 0.3
-        });
+      // ---- Beautification (skin smoothing on detected faces) ----
+      if (f.beautification.enabled) {
+        // Need a face box in source coords; reuse last mesh or detection.
+        let box: Rect | null = null;
+        if (lastFaceMeshes.current.length > 0) {
+          box = getFaceBox(lastFaceMeshes.current[0]);
+        } else if (lastFaces.current.length > 0) {
+          const s = toPoint(lastFaces.current[0].topLeft);
+          const e = toPoint(lastFaces.current[0].bottomRight);
+          if (s && e) box = { x: s[0] / scale, y: s[1] / scale, w: (e[0] - s[0]) / scale, h: (e[1] - s[1]) / scale };
+        }
+        if (box) beautifyRegion(toneCanvas, W, H, box, f.beautification.sensitivity * 0.8);
       }
 
-      if (features.enhancedLighting.enabled) {
-        applyVisualEffects(ctx, videoElement, {
-          brightness: 1 + features.enhancedLighting.sensitivity * 0.3,
-          contrast: 1 + features.enhancedLighting.sensitivity * 0.1
-        });
-      }
+      // Composite tonal/denoise/beautify result as the working frame.
+      ctx.clearRect(0, 0, W, H);
+      ctx.drawImage(toneCanvas, 0, 0);
 
-      // Apply face detection if enabled
-      if ((features.faceDetection.enabled || features.facialLandmarks.enabled || 
-           features.expressionDetection.enabled || features.beautification.enabled) && 
-           models.faceDetection) {
-        try {
-          // Use the model to detect faces
-          const predictions = await models.faceDetection.estimateFaces(inputTensor, false);
-          
-          // Draw face detection boxes if enabled
-          if (features.faceDetection.enabled) {
-            predictions.forEach(prediction => {
-              const start = toPoint(prediction.topLeft);
-              const end = toPoint(prediction.bottomRight);
-              if (!start || !end) return;
-
-              const size = [
-                (end[0] - start[0]) / processScale, 
-                (end[1] - start[1]) / processScale
-              ];
-              const adjustedStart = [start[0] / processScale, start[1] / processScale];
-    
-              ctx.strokeStyle = '#E44E51';
-              ctx.lineWidth = 2;
-              ctx.strokeRect(adjustedStart[0], adjustedStart[1], size[0], size[1]);
-              
-              // Draw confidence
-              const probability = toNumber(prediction.probability);
-              if (probability !== undefined) {
-                ctx.fillStyle = '#E44E51';
-                ctx.font = '12px Arial';
-                ctx.fillText(
-                  `${Math.round(probability * 100)}%`, 
-                  adjustedStart[0], adjustedStart[1] - 5
-                );
-              }
-            });
+      // ---- Face / landmark / expression detection ----
+      if ((f.faceDetection.enabled || f.facialLandmarks.enabled || f.expressionDetection.enabled || f.beautification.enabled) && m.faceDetection) {
+        if (frameCount.current % detectEvery === 0) {
+          lastFaces.current = await m.faceDetection.estimateFaces(analysisCanvas, false);
+        }
+        const faces = lastFaces.current;
+        for (const p of faces) {
+          const s = toPoint(p.topLeft);
+          const e = toPoint(p.bottomRight);
+          if (!s || !e) continue;
+          const size = [(e[0] - s[0]) / scale, (e[1] - s[1]) / scale];
+          const start = [s[0] / scale, s[1] / scale];
+          if (f.faceDetection.enabled) {
+            ctx.strokeStyle = '#E44E51';
+            ctx.lineWidth = 2;
+            const r = mapRect({ x: start[0], y: start[1], w: size[0], h: size[1] }, view, W, H);
+            ctx.strokeRect(r.x, r.y, r.w, r.h);
+            const prob = toNumber(p.probability);
+            if (prob !== undefined) {
+              ctx.fillStyle = '#E44E51';
+              ctx.font = '12px Arial';
+              ctx.fillText(`${Math.round(prob * 100)}%`, r.x, r.y - 5);
+            }
           }
-          
-          // Apply facial landmarks if enabled
-          if (features.facialLandmarks.enabled && models.faceLandmarks && predictions.length > 0) {
-            const facePredictions = await models.faceLandmarks.estimateFaces(videoElement, {
+        }
+
+        if ((f.facialLandmarks.enabled || f.expressionDetection.enabled || f.beautification.enabled) && m.faceLandmarks && faces.length > 0) {
+          if (frameCount.current % detectEvery === 0) {
+            lastFaceMeshes.current = await m.faceLandmarks.estimateFaces(analysisCanvas, {
               flipHorizontal: false,
               staticImageMode: false
             });
-            
-            facePredictions.forEach(prediction => {
-              const keypoints = prediction.keypoints;
-              
-              // Draw facial mesh points
+          }
+          for (const face of lastFaceMeshes.current) {
+            const kp = face.keypoints;
+            if (f.facialLandmarks.enabled) {
               ctx.fillStyle = '#E44E51';
-              for (let i = 0; i < keypoints.length; i += 5) { // Skip points for performance
-                const point = keypoints[i];
+              for (let i = 0; i < kp.length; i += 4) {
+                const pt = mapPoint(kp[i], view, W, H);
                 ctx.beginPath();
-                ctx.arc(point.x, point.y, 1, 0, 2 * Math.PI);
+                ctx.arc(pt.x, pt.y, 1, 0, 2 * Math.PI);
                 ctx.fill();
               }
-              
-              // Draw facial contours (eyes, mouth, etc.)
-              if (features.facialLandmarks.sensitivity > 0.7) {
+              if (f.facialLandmarks.sensitivity > 0.6) {
                 ctx.strokeStyle = '#00FFFF';
                 ctx.lineWidth = 1;
-                
-                ['leftEye', 'rightEye', 'lips'].forEach(part => {
+                for (const part of ['leftEye', 'rightEye', 'lips']) {
                   const indices = FACE_MESH_CONTOURS[part];
-                  if (!indices) return;
-                  
+                  if (!indices) continue;
                   ctx.beginPath();
-                  indices.forEach((index, i) => {
-                    const point = keypoints[index];
-                    if (!point) return;
-                    if (i === 0) ctx.moveTo(point.x, point.y);
-                    else ctx.lineTo(point.x, point.y);
+                  indices.forEach((idx, i) => {
+                    const pt = mapPoint(kp[idx], view, W, H);
+                    if (i === 0) ctx.moveTo(pt.x, pt.y);
+                    else ctx.lineTo(pt.x, pt.y);
                   });
                   ctx.closePath();
                   ctx.stroke();
-                });
-              }
-            });
-            
-            // Apply expression detection if enabled
-            if (features.expressionDetection.enabled && facePredictions.length > 0) {
-              // This is a simplified version - actual expression detection would use a specific model
-              // For now, we'll simulate expression detection based on facial landmarks
-              facePredictions.forEach(prediction => {
-                const keypoints = prediction.keypoints;
-                const box = getFaceBox(prediction);
-                if (!box) return;
-                
-                // Eye corners + inner lips of the MediaPipe face mesh
-                const leftEye = keypoints[33];
-                const rightEye = keypoints[263];
-                const upperLip = keypoints[13];
-                const lowerLip = keypoints[14];
-                
-                if (!leftEye || !rightEye || !upperLip || !lowerLip) return;
-                
-                // Calculate mouth openness (smile detection)
-                const mouthOpenness = lowerLip.y - upperLip.y;
-                const eyeDistance = Math.hypot(rightEye.x - leftEye.x, rightEye.y - leftEye.y);
-                
-                // Normalize by face size (guard against a degenerate face mesh)
-                if (eyeDistance <= 0) return;
-                const normalizedMouthOpenness = mouthOpenness / eyeDistance;
-                
-                // Determine expression (very simplified)
-                let expression = 'Neutral';
-                if (normalizedMouthOpenness > 0.2) {
-                  expression = 'Smiling';
-                } else if (normalizedMouthOpenness < 0.05) {
-                  expression = 'Serious';
                 }
-                
-                // Display the expression
-                ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-                ctx.fillRect(box.x, box.y - 30, 100, 25);
-                ctx.fillStyle = '#ffffff';
-                ctx.font = '16px Arial';
-                ctx.fillText(expression, box.x + 10, box.y - 10);
-              });
+              }
             }
-            
-            // Apply beautification if enabled
-            if (features.beautification.enabled) {
-              // Real beautification would use more advanced techniques
-              // This is a simple simulation using canvas filters
-              const tempCanvas = getScratchCanvas('beautify', canvasElement.width, canvasElement.height);
-              const tempCtx = tempCanvas.getContext('2d');
-              
-              if (tempCtx) {
-                // Draw the original image
-                tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
-                tempCtx.filter = 'none';
-                tempCtx.drawImage(canvasElement, 0, 0);
-                
-                // Apply beautification effects
-                const intensity = features.beautification.sensitivity;
-                tempCtx.filter = `saturate(${1 + intensity * 0.3}) brightness(${1 + intensity * 0.1}) contrast(${1 + intensity * 0.1})`;
-                
-                // Only apply beautification to face regions
-                facePredictions.forEach(prediction => {
-                  const box = getFaceBox(prediction);
-                  if (!box) return;
-                  
-                  const margin = Math.min(box.width, box.height) * 0.2;
-                  
-                  // Expand the face region slightly
-                  const x = Math.max(0, box.x - margin);
-                  const y = Math.max(0, box.y - margin);
-                  const width = Math.min(canvasElement.width - x, box.width + margin * 2);
-                  const height = Math.min(canvasElement.height - y, box.height + margin * 2);
-                  
-                  if (width <= 0 || height <= 0) return;
-                  
-                  // Apply subtle skin smoothing (simulate by a slight blur + preserve edges)
-                  tempCtx.filter = `blur(${intensity * 2}px)`;
-                  tempCtx.drawImage(
-                    canvasElement, 
-                    x, y, width, height,  // Source rectangle
-                    x, y, width, height   // Destination rectangle
-                  );
-                });
-                
-                // Copy back beautified face regions
-                tempCtx.filter = 'none';
-                ctx.drawImage(tempCanvas, 0, 0);
+            if (f.expressionDetection.enabled) {
+              const box = getFaceBox(face);
+              if (box) {
+                const expr = classifyExpression(kp as { x: number; y: number }[], f.expressionDetection.sensitivity);
+                const rb = mapRect(box, view, W, H);
+                ctx.fillStyle = 'rgba(0,0,0,0.6)';
+                ctx.fillRect(rb.x, rb.y - 24, 110, 22);
+                ctx.fillStyle = '#fff';
+                ctx.font = '15px Arial';
+                ctx.fillText(expr, rb.x + 8, rb.y - 8);
               }
             }
           }
-        } catch (error) {
-          console.error('Error in face detection/landmarks:', error);
         }
       }
 
-      // Apply hand pose detection if enabled
-      if ((features.handPoseEstimation.enabled || features.gestureRecognition.enabled) && 
-           models.handPose) {
-        try {
-          const hands = await models.handPose.estimateHands(videoElement);
-          
-          if (features.handPoseEstimation.enabled) {
-            // Draw hand landmarks
-            hands.forEach(hand => {
-              const landmarks = hand.keypoints;
-              ctx.fillStyle = '#00FF00';
-              
-              // Draw hand keypoints
-              for (const point of landmarks) {
-                ctx.beginPath();
-                ctx.arc(point.x, point.y, 4, 0, 2 * Math.PI);
-                ctx.fill();
-              }
-              
-              // Connect keypoints to form hand skeleton
-              ctx.strokeStyle = '#00FF00';
-              ctx.lineWidth = 2;
-              
-              // Define connections between keypoints to create a skeleton
-              const connections = [
-                // Thumb
-                [0, 1], [1, 2], [2, 3], [3, 4],
-                // Index finger
-                [0, 5], [5, 6], [6, 7], [7, 8],
-                // Middle finger
-                [0, 9], [9, 10], [10, 11], [11, 12],
-                // Ring finger
-                [0, 13], [13, 14], [14, 15], [15, 16],
-                // Pinky finger
-                [0, 17], [17, 18], [18, 19], [19, 20],
-                // Palm
-                [0, 5], [5, 9], [9, 13], [13, 17]
-              ];
-              
-              for (const [i, j] of connections) {
-                if (landmarks[i] && landmarks[j]) {
-                  ctx.beginPath();
-                  ctx.moveTo(landmarks[i].x, landmarks[i].y);
-                  ctx.lineTo(landmarks[j].x, landmarks[j].y);
-                  ctx.stroke();
-                }
-              }
-            });
-          }
-          
-          // Gesture recognition
-          if (features.gestureRecognition.enabled && hands.length > 0) {
-            hands.forEach(hand => {
-              const keypoints = hand.keypoints;
-              
-              // Simple gesture detection
-              const thumbTip = keypoints.find(k => k.name === 'thumb_tip');
-              const indexTip = keypoints.find(k => k.name === 'index_finger_tip');
-              const middleTip = keypoints.find(k => k.name === 'middle_finger_tip');
-              const ringTip = keypoints.find(k => k.name === 'ring_finger_tip');
-              const pinkyTip = keypoints.find(k => k.name === 'pinky_finger_tip');
-              const wrist = keypoints.find(k => k.name === 'wrist');
-              
-              if (thumbTip && indexTip && middleTip && ringTip && pinkyTip && wrist) {
-                // Calculate distances
-                const thumbToIndex = Math.hypot(thumbTip.x - indexTip.x, thumbTip.y - indexTip.y);
-                const thumbToWrist = Math.hypot(thumbTip.x - wrist.x, thumbTip.y - wrist.y);
-                
-                // Determine gesture
-                let gesture = '';
-                
-                // Fist detection - all finger tips close to wrist
-                const allFingers = [indexTip, middleTip, ringTip, pinkyTip];
-                const fingersExtended = allFingers.filter(finger => 
-                  Math.hypot(finger.x - wrist.x, finger.y - wrist.y) > thumbToWrist * 0.6
-                ).length;
-                
-                if (fingersExtended === 0) {
-                  gesture = 'Fist';
-                } else if (fingersExtended === 1 && 
-                           Math.hypot(indexTip.x - wrist.x, indexTip.y - wrist.y) > thumbToWrist * 0.7) {
-                  gesture = 'Pointing';
-                } else if (fingersExtended === 2 && 
-                           Math.hypot(indexTip.x - wrist.x, indexTip.y - wrist.y) > thumbToWrist * 0.7 &&
-                           Math.hypot(middleTip.x - wrist.x, middleTip.y - wrist.y) > thumbToWrist * 0.7) {
-                  gesture = 'Peace';
-                } else if (thumbToIndex < 20) {
-                  gesture = 'Pinch';
-                } else if (fingersExtended >= 4) {
-                  gesture = 'Open Hand';
-                }
-                
-                if (gesture) {
-                  // Display the detected gesture
-                  const x = wrist.x;
-                  const y = wrist.y - 20;
-                  
-                  ctx.fillStyle = 'rgba(0,0,0,0.6)';
-                  ctx.fillRect(x - 10, y - 18, gesture.length * 10 + 20, 25);
-                  
-                  ctx.fillStyle = '#ffffff';
-                  ctx.font = '16px Arial';
-                  ctx.textAlign = 'center';
-                  ctx.fillText(gesture, x + gesture.length * 5, y);
-                }
-              }
-            });
-          }
-        } catch (error) {
-          console.error('Error in hand pose detection:', error);
+      // ---- Hand pose + gesture ----
+      if ((f.handPoseEstimation.enabled || f.gestureRecognition.enabled) && m.handPose) {
+        if (frameCount.current % detectEvery === 0) {
+          lastHands.current = await m.handPose.estimateHands(analysisCanvas, { flipHorizontal: false });
         }
-      }
-
-      // Apply background effects if enabled
-      if ((features.backgroundRemoval.enabled || features.backgroundBlur.enabled) && 
-           models.bodySegmentation) {
-        try {
-          const segmentation = await models.bodySegmentation.segmentPeople(videoElement, {
-            multiSegmentation: false,
-            segmentBodyParts: false,
-            segmentationThreshold: 0.5
-          });
-          
-          if (segmentation.length > 0) {
-            // Create foreground mask (ImageData - it has to be painted into a
-            // canvas before it can be used as a compositing source).
-            const foregroundMask = await bodySegmentation.toBinaryMask(
-              segmentation,
-              { r: 0, g: 0, b: 0, a: 0 },
-              { r: 0, g: 0, b: 0, a: 255 }
-            );
-
-            const maskCanvas = getScratchCanvas('mask', foregroundMask.width, foregroundMask.height);
-            const maskCtx = maskCanvas.getContext('2d');
-            if (!maskCtx) return;
-            maskCtx.putImageData(foregroundMask, 0, 0);
-            
-            if (features.backgroundBlur.enabled) {
-              // Apply blur effect to background
-              ctx.save();
-              
-              // Draw blurred background
-              const blurAmount = features.backgroundBlur.sensitivity * 15;
-              ctx.filter = `blur(${blurAmount}px)`;
-              ctx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
-              ctx.filter = 'none';
-              
-              // Draw foreground over blurred background
-              const fgCanvas = getScratchCanvas('foreground', canvasElement.width, canvasElement.height);
-              const fgCtx = fgCanvas.getContext('2d');
-              
-              if (fgCtx) {
-                fgCtx.globalCompositeOperation = 'source-over';
-                fgCtx.clearRect(0, 0, fgCanvas.width, fgCanvas.height);
-                fgCtx.drawImage(videoElement, 0, 0, fgCanvas.width, fgCanvas.height);
-                fgCtx.globalCompositeOperation = 'destination-in';
-                fgCtx.drawImage(maskCanvas, 0, 0, fgCanvas.width, fgCanvas.height);
-                fgCtx.globalCompositeOperation = 'source-over';
-                
-                ctx.drawImage(fgCanvas, 0, 0);
-              }
-              
-              ctx.restore();
+        for (const hand of lastHands.current) {
+          const kp = hand.keypoints;
+          if (f.handPoseEstimation.enabled) {
+            ctx.fillStyle = '#00FF00';
+            for (const pt of kp) {
+              const mp = mapPoint(pt, view, W, H);
+              ctx.beginPath();
+              ctx.arc(mp.x, mp.y, 4, 0, 2 * Math.PI);
+              ctx.fill();
             }
-            
-            if (features.backgroundRemoval.enabled) {
-              // Replace background with solid color
-              ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-              
-              // Fill with green or custom color for chroma keying
-              ctx.fillStyle = '#00FF00'; // Green screen color
-              ctx.fillRect(0, 0, canvasElement.width, canvasElement.height);
-              
-              // Draw foreground over background
-              const fgCanvas = getScratchCanvas('foreground', canvasElement.width, canvasElement.height);
-              const fgCtx = fgCanvas.getContext('2d');
-              
-              if (fgCtx) {
-                fgCtx.globalCompositeOperation = 'source-over';
-                fgCtx.clearRect(0, 0, fgCanvas.width, fgCanvas.height);
-                fgCtx.drawImage(videoElement, 0, 0, fgCanvas.width, fgCanvas.height);
-                fgCtx.globalCompositeOperation = 'destination-in';
-                fgCtx.drawImage(maskCanvas, 0, 0, fgCanvas.width, fgCanvas.height);
-                fgCtx.globalCompositeOperation = 'source-over';
-                
-                ctx.drawImage(fgCanvas, 0, 0);
-              }
-            }
-          }
-        } catch (error) {
-          console.error('Error in background processing:', error);
-        }
-      }
-      
-      // Apply style transfer if enabled
-      if (features.styleTransfer.enabled) {
-        // This is a simplified visual simulation of style transfer using canvas filters
-        const tempCanvas = getScratchCanvas('style', canvasElement.width, canvasElement.height);
-        const tempCtx = tempCanvas.getContext('2d');
-        
-        if (tempCtx) {
-          // Draw original image
-          tempCtx.filter = 'none';
-          tempCtx.globalAlpha = 1;
-          tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
-          tempCtx.drawImage(canvasElement, 0, 0);
-          
-          // Apply styling effects based on intensity
-          const intensity = features.styleTransfer.sensitivity;
-          
-          // Apply a variety of filters to simulate style transfer
-          tempCtx.filter = `saturate(${1.5 + intensity}) contrast(${1.2 + intensity}) brightness(${1 + intensity * 0.3})`;
-          tempCtx.globalAlpha = 0.8;
-          tempCtx.drawImage(canvasElement, 0, 0);
-          
-          // Add a hue rotation for artistic effect
-          tempCtx.filter = `hue-rotate(${intensity * 30}deg)`;
-          tempCtx.globalAlpha = intensity * 0.5;
-          tempCtx.drawImage(canvasElement, 0, 0);
-          
-          // Reset settings
-          tempCtx.filter = 'none';
-          tempCtx.globalAlpha = 1;
-          
-          // Draw the styled result back to the main canvas
-          ctx.drawImage(tempCanvas, 0, 0);
-        }
-      }
-      
-      // Apply auto framing if enabled
-      if (features.autoFraming.enabled && models.faceDetection) {
-        try {
-          const predictions = await models.faceDetection.estimateFaces(inputTensor, false);
-          
-          if (predictions.length > 0) {
-            // Find the bounding box that contains all faces
-            let minX = canvasElement.width;
-            let minY = canvasElement.height;
-            let maxX = 0;
-            let maxY = 0;
-            
-            predictions.forEach(prediction => {
-              const start = toPoint(prediction.topLeft);
-              const end = toPoint(prediction.bottomRight);
-              if (!start || !end) return;
-              
-              // Scale coordinates based on processing scale
-              const startScaled = [start[0] / processScale, start[1] / processScale];
-              const endScaled = [end[0] / processScale, end[1] / processScale];
-              
-              minX = Math.min(minX, startScaled[0]);
-              minY = Math.min(minY, startScaled[1]);
-              maxX = Math.max(maxX, endScaled[0]);
-              maxY = Math.max(maxY, endScaled[1]);
-            });
-            
-            // Add padding around the bounding box
-            const paddingX = (maxX - minX) * 0.3;
-            const paddingY = (maxY - minY) * 0.3;
-            
-            minX = Math.max(0, minX - paddingX);
-            minY = Math.max(0, minY - paddingY);
-            maxX = Math.min(canvasElement.width, maxX + paddingX);
-            maxY = Math.min(canvasElement.height, maxY + paddingY);
-            
-            // Calculate the framing rectangle
-            const frameWidth = maxX - minX;
-            const frameHeight = maxY - minY;
-            
-            // Draw a subtle frame indicator
-            ctx.strokeStyle = 'rgba(0, 255, 0, 0.5)';
+            const fingers = [[0, 1, 2, 3, 4], [0, 5, 6, 7, 8], [0, 9, 10, 11, 12], [0, 13, 14, 15, 16], [0, 17, 18, 19, 20]];
+            ctx.strokeStyle = '#00FF00';
             ctx.lineWidth = 2;
-            ctx.strokeRect(minX, minY, frameWidth, frameHeight);
-            
-            // In a real implementation, we would adjust the camera view
-            // Here we just show where the framing would occur
+            for (const finger of fingers) {
+              const pts = finger.map(idx => mapPoint(kp[idx], view, W, H)).filter(Boolean);
+              if (pts.length < 2) continue;
+              ctx.beginPath();
+              ctx.moveTo(pts[0].x, pts[0].y);
+              for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+              ctx.stroke();
+            }
           }
-        } catch (error) {
-          console.error('Error in auto framing:', error);
+          if (f.gestureRecognition.enabled) {
+            const g = classifyGesture(hand);
+            if (g !== 'unknown') {
+              const wrist = mapPoint(kp[0], view, W, H);
+              ctx.fillStyle = 'rgba(0,0,0,0.6)';
+              ctx.fillRect(wrist.x - 10, wrist.y - 38, g.length * 10 + 20, 24);
+              ctx.fillStyle = '#fff';
+              ctx.font = '15px Arial';
+              ctx.textAlign = 'center';
+              ctx.fillText(g, wrist.x + g.length * 5, wrist.y - 20);
+              ctx.textAlign = 'left';
+            }
+          }
         }
       }
-      
-      // Apply stabilization effect
-      if (features.stabilization.enabled) {
-        // Real stabilization would track motion and counter it
-        // This is a visual indicator that stabilization is active
-        ctx.strokeStyle = 'rgba(0, 255, 255, 0.7)';
-        ctx.lineWidth = 2;
-        
-        // Draw corner markers to indicate stabilization bounds
-        const size = 20;
-        const margin = 30;
-        
-        // Top-left
-        ctx.beginPath();
-        ctx.moveTo(margin, margin);
-        ctx.lineTo(margin + size, margin);
-        ctx.moveTo(margin, margin);
-        ctx.lineTo(margin, margin + size);
-        ctx.stroke();
-        
-        // Top-right
-        ctx.beginPath();
-        ctx.moveTo(canvasElement.width - margin, margin);
-        ctx.lineTo(canvasElement.width - margin - size, margin);
-        ctx.moveTo(canvasElement.width - margin, margin);
-        ctx.lineTo(canvasElement.width - margin, margin + size);
-        ctx.stroke();
-        
-        // Bottom-left
-        ctx.beginPath();
-        ctx.moveTo(margin, canvasElement.height - margin);
-        ctx.lineTo(margin + size, canvasElement.height - margin);
-        ctx.moveTo(margin, canvasElement.height - margin);
-        ctx.lineTo(margin, canvasElement.height - margin - size);
-        ctx.stroke();
-        
-        // Bottom-right
-        ctx.beginPath();
-        ctx.moveTo(canvasElement.width - margin, canvasElement.height - margin);
-        ctx.lineTo(canvasElement.width - margin - size, canvasElement.height - margin);
-        ctx.moveTo(canvasElement.width - margin, canvasElement.height - margin);
-        ctx.lineTo(canvasElement.width - margin, canvasElement.height - margin - size);
-        ctx.stroke();
+
+      // ---- Pose estimation (MoveNet skeleton) ----
+      if (f.poseEstimation.enabled && m.pose) {
+        if (frameCount.current % detectEvery === 0) {
+          lastPoses.current = await m.pose.estimatePoses(analysisCanvas, { flipHorizontal: false });
+        }
+        for (const pose of lastPoses.current) {
+          const kp = pose.keypoints;
+          ctx.fillStyle = '#FFCC00';
+          for (const kpt of kp) {
+            if ((kpt.score ?? 0) < 0.3) continue;
+            const mp = mapPoint(kpt, view, W, H);
+            ctx.beginPath();
+            ctx.arc(mp.x, mp.y, 4, 0, 2 * Math.PI);
+            ctx.fill();
+          }
+          const pairs = [[5, 6], [5, 7], [7, 9], [6, 8], [8, 10], [5, 11], [6, 12], [11, 12], [11, 13], [13, 15], [12, 14], [14, 16]];
+          ctx.strokeStyle = '#FFCC00';
+          ctx.lineWidth = 2;
+          for (const [a, b] of pairs) {
+            const ka = kp[a];
+            const kb = kp[b];
+            if (!ka || !kb || (ka.score ?? 0) < 0.3 || (kb.score ?? 0) < 0.3) continue;
+            const pa = mapPoint(ka, view, W, H);
+            const pb = mapPoint(kb, view, W, H);
+            ctx.beginPath();
+            ctx.moveTo(pa.x, pa.y);
+            ctx.lineTo(pb.x, pb.y);
+            ctx.stroke();
+          }
+        }
       }
-      
-    } catch (error) {
-      console.error('Error processing frame:', error);
-    } finally {
-      // Always dispose of the input tensor - an early return or a model error
-      // would otherwise leak a WebGL texture on every single frame.
-      inputTensor?.dispose();
-      inputTensor = null;
-    }
-    
-  }, [features, models, isModelsLoaded, processingQuality, updateFPS, applyVisualEffects, getScratchCanvas]);
+
+      // ---- Background removal / blur ----
+      if ((f.backgroundRemoval.enabled || f.backgroundBlur.enabled) && m.bodySegmentation) {
+        const seg = await m.bodySegmentation.segmentPeople(analysisCanvas, {
+          multiSegmentation: false,
+          segmentBodyParts: false,
+          segmentationThreshold: 0.5
+        });
+        if (seg.length > 0) {
+          const mask = await bodySegmentation.toBinaryMask(seg, { r: 0, g: 0, b: 0, a: 0 }, { r: 0, g: 0, b: 0, a: 255 });
+          const maskCanvas = getScratchCanvas('mask', mask.width, mask.height);
+          const maskCtx = maskCanvas.getContext('2d');
+          if (maskCtx) {
+            maskCtx.putImageData(mask, 0, 0);
+            // scaled mask -> output
+            const smc = getScratchCanvas('maskOut', W, H);
+            const smcCtx = smc.getContext('2d');
+            if (smcCtx) {
+              smcCtx.drawImage(maskCanvas, view.x * (mask.width / W), view.y * (mask.height / H), view.w * (mask.width / W), view.h * (mask.height / H), 0, 0, W, H);
+            }
+            if (f.backgroundBlur.enabled) {
+              ctx.save();
+              ctx.filter = `blur(${f.backgroundBlur.sensitivity * 15}px)`;
+              ctx.drawImage(videoElement, view.x, view.y, view.w, view.h, 0, 0, W, H);
+              ctx.filter = 'none';
+              ctx.restore();
+            } else if (f.backgroundRemoval.enabled) {
+              ctx.clearRect(0, 0, W, H);
+              ctx.fillStyle = '#00FF00';
+              ctx.fillRect(0, 0, W, H);
+            }
+            // draw foreground using the mask
+            const fg = getScratchCanvas('fg', W, H);
+            const fgCtx = fg.getContext('2d');
+            if (fgCtx) {
+              fgCtx.globalCompositeOperation = 'source-over';
+              fgCtx.clearRect(0, 0, W, H);
+              fgCtx.drawImage(videoElement, view.x, view.y, view.w, view.h, 0, 0, W, H);
+              fgCtx.globalCompositeOperation = 'destination-in';
+              if (smcCtx) fgCtx.drawImage(smc, 0, 0);
+              else fgCtx.drawImage(maskCanvas, 0, 0, W, H);
+              fgCtx.globalCompositeOperation = 'source-over';
+              ctx.drawImage(fg, 0, 0);
+            }
+          }
+        }
+      }
+
+      // ---- Scene detection (histogram cut detection) ----
+      if (f.sceneDetection.enabled) {
+        const hist = computeHistogram(analysisCanvas, aw, ah);
+        if (lastHist.current) {
+          const d = histogramDistance(hist, lastHist.current);
+          if (d > 6 - f.sceneDetection.sensitivity * 4 && videoElement.currentTime > 0.5) {
+            setSceneCuts(prev => {
+              if (prev.includes(Math.round(videoElement.currentTime))) return prev;
+              return [...prev, Math.round(videoElement.currentTime)];
+            });
+          }
+        }
+        lastHist.current = hist;
+      } else {
+        lastHist.current = null;
+      }
+
+      // ---- Speech recognition captions ----
+      if (f.speechRecognition.enabled && transcript) {
+        ctx.fillStyle = 'rgba(0,0,0,0.65)';
+        const words = transcript.split(' ').slice(-12).join(' ');
+        ctx.fillRect(0, H - 70, W, 60);
+        ctx.fillStyle = '#fff';
+        ctx.font = '20px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(words, W / 2, H - 30);
+        ctx.textAlign = 'left';
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [updateFPS]
+  );
+
+  const processVideo = useCallback(
+    async (
+      video: HTMLVideoElement,
+      canvas: HTMLCanvasElement,
+      options?: { fps?: number; mimeType?: string; onProgress?: (p: number) => void; signal?: AbortSignal }
+    ): Promise<Blob> => {
+      return processVideoToBlob(video, processFrame, canvas, options);
+    },
+    [processFrame]
+  );
 
   return {
     features,
@@ -1181,10 +998,16 @@ export const useAIFeatures = () => {
     updateFeatureSettings,
     loadModels,
     processFrame,
+    processVideo,
     isModelsLoaded,
     isModelsLoading,
     activeModels,
     processingQuality,
-    setProcessingQuality
+    setProcessingQuality,
+    transcript,
+    sceneCuts
   };
 };
+
+const clamp = (v: number, min: number, max: number): number => (v < min ? min : v > max ? max : v);
+const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;

@@ -1,8 +1,28 @@
 import React from 'react';
-import { Camera, Sparkles, Focus, Wind, Palette, Gauge, Scan, Layers, Mic, AlertCircle, HandMetal, Smile, Monitor, Trash, Maximize, Filter, Lightbulb, Wand2, Send, Vibrate } from 'lucide-react';
+import { Camera, Sparkles, Focus, Wind, Palette, Gauge, Scan, Layers, Mic, AlertCircle, HandMetal, Smile, Monitor, Trash, Filter, Lightbulb, Send, Vibrate } from 'lucide-react';
 import { Tooltip } from '../ui/Tooltip';
 import { motion } from 'framer-motion';
-import { AIFeature } from '../../hooks/useAIFeatures';
+import { AIFeature, AI_FEATURE_REGISTRY } from '../../hooks/useAIFeatures';
+
+const AI_FEATURE_ICONS: Record<string, React.ElementType> = {
+  faceDetection: Camera,
+  facialLandmarks: Scan,
+  handPoseEstimation: HandMetal,
+  poseEstimation: Vibrate,
+  backgroundRemoval: Trash,
+  backgroundBlur: Layers,
+  gestureRecognition: Send,
+  expressionDetection: Smile,
+  autoFraming: Focus,
+  enhancedLighting: Lightbulb,
+  sceneDetection: Monitor,
+  beautification: Sparkles,
+  autoExposure: Filter,
+  colorEnhancement: Palette,
+  stabilization: Gauge,
+  denoising: Wind,
+  speechRecognition: Mic
+};
 
 interface AIFeatureGridProps {
   onFeatureToggle: (feature: string) => void;
@@ -17,128 +37,7 @@ export const AIFeatureGrid: React.FC<AIFeatureGridProps> = ({
   isProcessing = false,
   compact = false
 }) => {
-  const features = [
-    {
-      id: 'faceDetection',
-      name: 'Face Detection',
-      icon: Camera,
-      description: 'Detect and track faces in real-time'
-    },
-    {
-      id: 'facialLandmarks',
-      name: 'Facial Landmarks',
-      icon: Scan,
-      description: 'Identify facial points for precise tracking'
-    },
-    {
-      id: 'handPoseEstimation',
-      name: 'Hand Tracking',
-      icon: HandMetal,
-      description: 'Track hand positions and gestures'
-    },
-    {
-      id: 'poseEstimation',
-      name: 'Pose Estimation',
-      icon: Vibrate,
-      description: 'Track full body positions and movements'
-    },
-    {
-      id: 'backgroundRemoval',
-      name: 'Background Removal',
-      icon: Trash,
-      description: 'Remove background completely'
-    },
-    {
-      id: 'backgroundBlur',
-      name: 'Background Blur',
-      icon: Layers,
-      description: 'Blur background while keeping subject in focus'
-    },
-    {
-      id: 'gestureRecognition',
-      name: 'Gesture Control',
-      icon: Send,
-      description: 'Control recording with hand gestures'
-    },
-    {
-      id: 'expressionDetection',
-      name: 'Expression Detection',
-      icon: Smile,
-      description: 'Detect facial expressions and emotions'
-    },
-    {
-      id: 'autoFraming',
-      name: 'Auto Framing',
-      icon: Focus,
-      description: 'Automatically frame and follow subjects'
-    },
-    {
-      id: 'enhancedLighting',
-      name: 'Enhanced Lighting',
-      icon: Lightbulb,
-      description: 'Automatically adjust lighting conditions'
-    },
-    {
-      id: 'sceneDetection',
-      name: 'Scene Detection',
-      icon: Monitor,
-      description: 'Detect and optimize for different scenes'
-    },
-    {
-      id: 'beautification',
-      name: 'Beautification',
-      icon: Sparkles,
-      description: 'Enhance facial features automatically'
-    },
-    {
-      id: 'styleTransfer',
-      name: 'Style Transfer',
-      icon: Wand2,
-      description: 'Apply artistic styles to your video'
-    },
-    {
-      id: 'autoExposure',
-      name: 'Auto Exposure',
-      icon: Filter,
-      description: 'Dynamic exposure adjustment'
-    },
-    {
-      id: 'colorEnhancement',
-      name: 'Color Enhancement',
-      icon: Palette,
-      description: 'Optimize colors and white balance'
-    },
-    {
-      id: 'stabilization',
-      name: 'Stabilization',
-      icon: Gauge,
-      description: 'Reduce camera shake and motion'
-    },
-    {
-      id: 'noiseReduction',
-      name: 'Noise Reduction',
-      icon: Wind,
-      description: 'Reduce video noise'
-    },
-    {
-      id: 'speechRecognition',
-      name: 'Speech Recognition',
-      icon: Mic,
-      description: 'Generate real-time captions'
-    },
-    {
-      id: 'sentimentAnalysis',
-      name: 'Sentiment Analysis',
-      icon: AlertCircle,
-      description: 'Analyze emotional tone in speech'
-    },
-    {
-      id: 'superResolution',
-      name: 'Super Resolution',
-      icon: Maximize,
-      description: 'Improve video quality automatically'
-    }
-  ];
+  const features = AI_FEATURE_REGISTRY;
 
   // Filter the displayed features for compact mode
   const displayedFeatures = compact 
@@ -148,7 +47,8 @@ export const AIFeatureGrid: React.FC<AIFeatureGridProps> = ({
   return (
     <div className="space-y-4">
       <div className={`grid ${compact ? 'grid-cols-3' : 'grid-cols-2 sm:grid-cols-4 md:grid-cols-5'} gap-3`}>
-        {displayedFeatures.map(({ id, name, icon: Icon, description }) => {
+        {displayedFeatures.map(({ id, name, description }) => {
+          const Icon = AI_FEATURE_ICONS[id] ?? Camera;
           const feature = enabledFeatures[id];
           const isEnabled = feature?.enabled;
           const isLoading = feature?.loading;

@@ -1,7 +1,8 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Video, Upload, Volume2, Play, Pause, Square, Brain, Camera, Monitor, Layout, Settings, Mic, MicOff, Sliders, RefreshCw, X, AlertCircle } from 'lucide-react';
 import { useAIFeatures } from '../../hooks/useAIFeatures';
 import {
+  createCanvasRecordingStream,
   createMediaRecorder,
   getMediaErrorMessage,
   getMediaSupportError,
@@ -53,6 +54,39 @@ const QUALITY_BITRATES: Record<Quality, number> = {
 const TIMED_DURATION_SECONDS = 60;
 const SEGMENT_DURATION_SECONDS = 30;
 
+/** Capture rate used for the AI canvas when no frame rate is selected. */
+const AI_CANVAS_FPS = 30;
+
+/**
+ * Resolves once the <video> element has decoded a frame (or the timeout is
+ * reached). The AI canvas can only be sized from a decoded frame and
+ * `captureStream()` freezes the track dimensions at capture time, so the very
+ * first processed frame has to be painted before the recording starts.
+ */
+const waitForVideoFrame = (video: HTMLVideoElement, timeoutMs = 3000): Promise<boolean> =>
+  new Promise(resolve => {
+    if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
+      resolve(true);
+      return;
+    }
+
+    let settled = false;
+    const finish = (ready: boolean) => {
+      if (settled) return;
+      settled = true;
+      window.clearInterval(poll);
+      window.clearTimeout(timeout);
+      resolve(ready);
+    };
+
+    const poll = window.setInterval(() => {
+      if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
+        finish(true);
+      }
+    }, 50);
+    const timeout = window.setTimeout(() => finish(false), timeoutMs);
+  });
+
 export const VideoRecorder: React.FC = () => {
   // Recording state
   const [recordingMode, setRecordingMode] = useState<'webcam' | 'screen' | 'pip'>('webcam');
@@ -81,6 +115,11 @@ export const VideoRecorder: React.FC = () => {
   const [showAIFeatures, setShowAIFeatures] = useState(false);
   const [videoProcessed, setVideoProcessed] = useState(false);
   const [showFullAI, setShowFullAI] = useState(false);
+  // True while the <video> element is showing a live capture (camera/screen)
+  // rather than a local/processed file – only then can AI frames be produced.
+  const [hasLiveVideoSource, setHasLiveVideoSource] = useState(false);
+  // True while the take in progress is being recorded from the AI canvas
+  const [isBakingAI, setIsBakingAI] = useState(false);
 
   // Advanced settings (applied to the capture + the MediaRecorder)
   const [resolution, setResolution] = useState<Resolution>('1080p');
@@ -105,9 +144,14 @@ export const VideoRecorder: React.FC = () => {
 
   // Refs
   const videoRef = useRef<HTMLVideoElement>(null);
+  // Canvas the AI pipeline paints on – it is the video source of the
+  // recording whenever at least one AI feature is enabled.
+  const aiCanvasRef = useRef<HTMLCanvasElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
+  // Stream fed to MediaRecorder when AI is baked in (canvas video + mixed audio)
+  const aiRecordingStreamRef = useRef<MediaStream | null>(null);
   const timerIntervalRef = useRef<number | null>(null);
   const audioMixRef = useRef<MixedAudio | null>(null);
   // Source streams (screen, webcam, mic) – the recorded stream only holds a
@@ -119,9 +163,133 @@ export const VideoRecorder: React.FC = () => {
   // Auto-stop length of the take in progress ('timed'/'segmented' modes)
   const maxDurationRef = useRef<number | undefined>(undefined);
   const countdownTimeoutRef = useRef<number | null>(null);
+  // Metadata of the finished take – the <video> element reports 0/NaN once
+  // the capture tracks have been released.
+  const recordedSizeRef = useRef({ width: 0, height: 0 });
+  const recordedDurationRef = useRef(0);
 
   // AI Features
-  const { features, toggleFeature, loadModels } = useAIFeatures();
+  const { features, toggleFeature, loadModels, processFrame, isModelsLoaded } = useAIFeatures();
+
+  /** At least one AI effect is switched on – the take has to be processed. */
+  const aiEnabled = useMemo(
+    () => Object.values(features).some(feature => feature.enabled),
+    [features]
+  );
+
+  // The render loop and the recording setup live outside React's render cycle,
+  // so the values they need are mirrored in refs. `processFrame` in particular
+  // is recreated whenever a feature is toggled – reading it through a ref is
+  // what makes the side-panel toggles drive the canvas (and therefore the
+  // recording) while a take is running.
+  const processFrameRef = useRef(processFrame);
+  const isModelsLoadedRef = useRef(isModelsLoaded);
+  const aiEnabledRef = useRef(aiEnabled);
+  // True only while the AI render loop is actually painting the canvas
+  const aiCanvasLiveRef = useRef(false);
+  // Guards against two overlapping `processFrame` calls (the loop and the
+  // frame painted while the recording is being set up)
+  const aiFrameInFlightRef = useRef(false);
+  // The canvas holds a frame that matches the current capture
+  const aiCanvasPaintedRef = useRef(false);
+
+  useEffect(() => {
+    processFrameRef.current = processFrame;
+  }, [processFrame]);
+
+  useEffect(() => {
+    isModelsLoadedRef.current = isModelsLoaded;
+  }, [isModelsLoaded]);
+
+  useEffect(() => {
+    aiEnabledRef.current = aiEnabled;
+  }, [aiEnabled]);
+
+  // Run the AI pipeline while the take is being recorded from the canvas, and
+  // while the live preview is shown so the toggles are immediately visible.
+  // The advanced overlay (`AIVideoFeatures`) paints its own canvas – don't
+  // process the preview twice for it.
+  const aiCanvasActive =
+    aiEnabled && (isBakingAI || (!isRecording && hasLiveVideoSource && !showFullAI));
+
+  /**
+   * Paints one AI processed frame onto the canvas. Falls back to the raw
+   * frame while the models are still loading (or when processing fails) so
+   * the recorded canvas never goes blank.
+   */
+  const renderAIFrame = useCallback(
+    async (video: HTMLVideoElement, canvas: HTMLCanvasElement): Promise<boolean> => {
+      // Another frame is still being processed – report whether the canvas
+      // already holds a usable picture instead of queueing a second pass.
+      if (aiFrameInFlightRef.current) return aiCanvasPaintedRef.current;
+      if (video.readyState < 2 || !video.videoWidth || !video.videoHeight) {
+        return aiCanvasPaintedRef.current;
+      }
+
+      aiFrameInFlightRef.current = true;
+      try {
+        if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+        }
+
+        if (isModelsLoadedRef.current) {
+          try {
+            await processFrameRef.current(video, canvas);
+            aiCanvasPaintedRef.current = true;
+            return true;
+          } catch (err) {
+            console.warn('AI frame processing failed, using the raw frame:', err);
+          }
+        }
+
+        const context = canvas.getContext('2d');
+        if (!context) return aiCanvasPaintedRef.current;
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        aiCanvasPaintedRef.current = true;
+        return true;
+      } finally {
+        aiFrameInFlightRef.current = false;
+      }
+    },
+    []
+  );
+
+  // requestAnimationFrame loop feeding the AI canvas (and therefore the
+  // recording). It only exists while an AI feature is enabled – with every
+  // feature off nothing is scheduled and the raw stream is recorded as before.
+  useEffect(() => {
+    if (!aiCanvasActive) return;
+
+    let cancelled = false;
+    let frameId = 0;
+    aiCanvasLiveRef.current = true;
+
+    const scheduleNext = () => {
+      if (cancelled) return;
+      frameId = window.requestAnimationFrame(renderLoop);
+    };
+
+    const renderLoop = () => {
+      if (cancelled) return;
+      const video = videoRef.current;
+      const canvas = aiCanvasRef.current;
+      if (!video || !canvas) {
+        scheduleNext();
+        return;
+      }
+      renderAIFrame(video, canvas).then(scheduleNext, scheduleNext);
+    };
+
+    frameId = window.requestAnimationFrame(renderLoop);
+
+    return () => {
+      cancelled = true;
+      aiCanvasLiveRef.current = false;
+      aiCanvasPaintedRef.current = false;
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [aiCanvasActive, renderAIFrame]);
 
   // Format recording time
   const formatTime = (seconds: number) => {
@@ -190,29 +358,43 @@ export const VideoRecorder: React.FC = () => {
     });
 
   /**
-   * Grabs the frame currently shown in the <video> element as a PNG blob.
+   * Grabs the frame currently shown as a PNG blob. When the AI pipeline is
+   * driving the recording the poster is taken from the AI canvas so it
+   * matches the saved video; otherwise the <video> element is used.
    * Must run before the capture tracks are stopped, otherwise the element is
    * already blank. Returns `null` when nothing can be drawn (e.g. tainted
    * canvas or no frame yet).
    */
   const captureThumbnail = (): Promise<Blob | null> =>
     new Promise(resolve => {
-      const video = videoRef.current;
-      if (!video || !video.videoWidth || !video.videoHeight) {
+      const aiCanvas = aiCanvasRef.current;
+      const source =
+        aiCanvasLiveRef.current && aiCanvas && aiCanvas.width > 0 && aiCanvas.height > 0
+          ? aiCanvas
+          : videoRef.current;
+
+      if (!source) {
+        resolve(null);
+        return;
+      }
+
+      const width = source instanceof HTMLCanvasElement ? source.width : source.videoWidth;
+      const height = source instanceof HTMLCanvasElement ? source.height : source.videoHeight;
+      if (!width || !height) {
         resolve(null);
         return;
       }
 
       try {
         const canvas = document.createElement('canvas');
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
+        canvas.width = width;
+        canvas.height = height;
         const context = canvas.getContext('2d');
         if (!context) {
           resolve(null);
           return;
         }
-        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        context.drawImage(source, 0, 0, canvas.width, canvas.height);
         canvas.toBlob(blob => resolve(blob), 'image/png');
       } catch (err) {
         // A thumbnail is a nice-to-have – never fail the recording over it
@@ -221,8 +403,16 @@ export const VideoRecorder: React.FC = () => {
       }
     });
 
+  /** Stops the canvas capture used to bake the AI effects into the take. */
+  const releaseAIRecordingStream = () => {
+    aiRecordingStreamRef.current?.getVideoTracks().forEach(track => track.stop());
+    aiRecordingStreamRef.current = null;
+    setIsBakingAI(false);
+  };
+
   // Release every capture track (camera, mic, screen) plus the audio mixer
   const releaseStream = () => {
+    releaseAIRecordingStream();
     streamRef.current?.getTracks().forEach(track => track.stop());
     streamRef.current = null;
     sourceStreamsRef.current.forEach(source => {
@@ -231,6 +421,7 @@ export const VideoRecorder: React.FC = () => {
     sourceStreamsRef.current = [];
     audioMixRef.current?.close();
     audioMixRef.current = null;
+    setHasLiveVideoSource(false);
   };
 
   // Replace the <video> source with a local object URL, revoking the previous one
@@ -326,6 +517,8 @@ export const VideoRecorder: React.FC = () => {
 
       streamRef.current?.getTracks().forEach(track => track.stop());
       streamRef.current = null;
+      aiRecordingStreamRef.current?.getVideoTracks().forEach(track => track.stop());
+      aiRecordingStreamRef.current = null;
       sourceStreamsRef.current.forEach(source => {
         source.getTracks().forEach(track => track.stop());
       });
@@ -366,6 +559,7 @@ export const VideoRecorder: React.FC = () => {
         streamRef.current = stream;
         videoRef.current.srcObject = stream;
         videoRef.current.play().catch(() => undefined);
+        setHasLiveVideoSource(true);
       } catch (err) {
         // A missing permission here is not fatal – recording asks again later
         console.error('Error setting up camera preview:', err);
@@ -524,12 +718,43 @@ export const VideoRecorder: React.FC = () => {
         videoRef.current.muted = true; // Mute to prevent feedback
         videoRef.current.play().catch(() => undefined);
       }
+      setHasLiveVideoSource(true);
+
+      // Bake the AI effects into the take: with at least one feature enabled
+      // the picture is taken from the AI canvas (fed by the rAF loop below)
+      // instead of the raw camera/display track, keeping the audio track the
+      // capture already carries (mixed system+mic, or the selected mic).
+      let recordingStream = stream;
+      if (aiEnabledRef.current && videoRef.current && aiCanvasRef.current) {
+        const video = videoRef.current;
+        const canvas = aiCanvasRef.current;
+
+        // The canvas needs a correctly sized frame before `captureStream()`
+        await waitForVideoFrame(video);
+        const painted = await renderAIFrame(video, canvas);
+
+        const aiStream = painted
+          ? createCanvasRecordingStream(
+              canvas,
+              stream.getAudioTracks(),
+              frameRate > 0 ? frameRate : AI_CANVAS_FPS
+            )
+          : null;
+
+        if (aiStream) {
+          aiRecordingStreamRef.current = aiStream;
+          recordingStream = aiStream;
+          setIsBakingAI(true);
+        } else {
+          console.warn('AI canvas capture unavailable – recording the raw stream instead.');
+        }
+      }
 
       // Codec support differs per browser – only pass a mimeType we probed.
       // The requested container (webm/mp4) is preferred, with the usual
       // vp9 → vp8 → webm fallback when it is unavailable.
       const mediaRecorder = createMediaRecorder(
-        stream,
+        recordingStream,
         { bitsPerSecond: QUALITY_BITRATES[quality] },
         getMimeCandidates(format)
       );
@@ -556,6 +781,16 @@ export const VideoRecorder: React.FC = () => {
         // <video> element goes blank as soon as the stream is released.
         const thumbnailPromise = captureThumbnail();
 
+        // Remember the geometry of what was actually recorded (the AI canvas
+        // when AI is baked in) – it is gone once the tracks are stopped.
+        const recordedCanvas = aiRecordingStreamRef.current ? aiCanvasRef.current : null;
+        recordedSizeRef.current = {
+          width: recordedCanvas ? recordedCanvas.width : (videoRef.current?.videoWidth ?? 0),
+          height: recordedCanvas ? recordedCanvas.height : (videoRef.current?.videoHeight ?? 0)
+        };
+        recordedDurationRef.current = recordingTimeRef.current;
+        const bakedAI = recordedCanvas !== null;
+
         // Clean up recording resources
         stopTimer();
         releaseStream();
@@ -579,8 +814,9 @@ export const VideoRecorder: React.FC = () => {
         const now = new Date();
         setRecordingTitle(`Recording ${now.toLocaleString()}`);
 
-        // Set tags based on mode
-        setRecordingTags([recordingMode]);
+        // Set tags based on mode (AI takes are tagged so they are easy to find)
+        setRecordingTags(bakedAI ? [recordingMode, 'ai-enhanced'] : [recordingMode]);
+        setVideoProcessed(bakedAI);
 
         // Show download dialog
         setShowDownloadDialog(true);
@@ -603,10 +839,12 @@ export const VideoRecorder: React.FC = () => {
       startTimer(maxDurationRef.current);
     } catch (err) {
       console.error('Error starting recording:', err);
+      releaseAIRecordingStream();
       stream?.getTracks().forEach(track => track.stop());
       acquired.forEach(source => source.getTracks().forEach(track => track.stop()));
       audioMixRef.current?.close();
       audioMixRef.current = null;
+      setHasLiveVideoSource(false);
       setError(getMediaErrorMessage(err));
     } finally {
       setIsProcessing(false);
@@ -705,12 +943,37 @@ export const VideoRecorder: React.FC = () => {
     input.click();
   };
 
+  /**
+   * `AIVideoFeatures` hands back the AI processed clip for the video that is
+   * currently loaded (an upload, or the source shown in the advanced
+   * overlay). That clip becomes THE recording: it is previewed, downloaded
+   * and uploaded to Supabase from the save dialog.
+   */
   const handleAIProcessingComplete = (processedBlob: Blob) => {
+    if (!processedBlob || processedBlob.size === 0) return;
+
+    // Never swap the source out from under a take that is still running
+    if (isRecording) {
+      console.warn('Ignoring AI output while a recording is in progress.');
+      return;
+    }
+
+    // Some feature panels emit a still frame instead of a clip – keep it as
+    // the poster image rather than replacing the video with an image.
+    if (processedBlob.type && !processedBlob.type.startsWith('video/')) {
+      setRecordedThumbnail(processedBlob);
+      setVideoProcessed(true);
+      return;
+    }
+
     // Create URL for processed video (revoking the previous one)
     const url = URL.createObjectURL(processedBlob);
     setLocalVideoUrl(url);
     setVideoProcessed(true);
-    
+    setShowFullAI(false);
+    // The processed clip is a file, not a live capture
+    setHasLiveVideoSource(false);
+
     // Update video player with processed video
     if (videoRef.current) {
       videoRef.current.srcObject = null;
@@ -718,9 +981,17 @@ export const VideoRecorder: React.FC = () => {
       videoRef.current.load();
       videoRef.current.play().catch(() => undefined);
     }
-    
-    // Store for potential download
+
+    // Store for download *and* for the cloud save
     setRecordedBlob(processedBlob);
+    // Re-derive the poster from the processed clip (saveRecordingToDatabase
+    // falls back to the frame on screen when this is null)
+    setRecordedThumbnail(null);
+    setRecordingTitle(prev => (prev.trim() ? prev : `AI Recording ${new Date().toLocaleString()}`));
+    setRecordingTags(prev => (prev.includes('ai-enhanced') ? prev : [...prev, 'ai-enhanced']));
+
+    // Offer the same save/upload flow used after a live take
+    setShowDownloadDialog(true);
   };
   
   const saveRecordingToDatabase = async (blob: Blob) => {
@@ -735,6 +1006,17 @@ export const VideoRecorder: React.FC = () => {
         duration = Number.isFinite(videoRef.current.duration) ? videoRef.current.duration : 0;
         width = videoRef.current.videoWidth;
         height = videoRef.current.videoHeight;
+      }
+
+      // The element is blank once the capture tracks are stopped – fall back
+      // to the size the take was recorded at (the AI canvas when it was used).
+      if (!width || !height) {
+        width = recordedSizeRef.current.width;
+        height = recordedSizeRef.current.height;
+      }
+
+      if (!duration && recordedDurationRef.current > 0) {
+        duration = recordedDurationRef.current;
       }
       
       // Get file format from blob type
@@ -849,6 +1131,19 @@ export const VideoRecorder: React.FC = () => {
           muted
           className="w-full h-full object-cover"
         />
+
+        {/*
+          AI canvas: the rAF loop paints the processed frames here and, while
+          any AI feature is enabled, this canvas is what MediaRecorder records.
+          It is hidden (and idle) whenever no AI feature is on, so the raw
+          stream keeps being recorded exactly as before.
+        */}
+        <canvas
+          ref={aiCanvasRef}
+          className={`absolute inset-0 w-full h-full object-cover pointer-events-none ${
+            aiCanvasActive ? '' : 'hidden'
+          }`}
+        />
         
         {/* Upload Overlay - only show when not recording */}
         {!isRecording && (
@@ -904,9 +1199,23 @@ export const VideoRecorder: React.FC = () => {
 
         {/* Recording timer */}
         {isRecording && (
-          <div className="absolute top-4 left-4 bg-red-600 px-3 py-1 rounded-full text-white text-sm flex items-center space-x-2">
-            <div className="w-2 h-2 bg-white rounded-full animate-pulse" />
-            <span>{formatTime(recordingTime)}</span>
+          <div className="absolute top-4 left-4 flex items-center space-x-2">
+            <div className="bg-red-600 px-3 py-1 rounded-full text-white text-sm flex items-center space-x-2">
+              <div className="w-2 h-2 bg-white rounded-full animate-pulse" />
+              <span>{formatTime(recordingTime)}</span>
+            </div>
+            {isBakingAI && (
+              <div className="bg-[#E44E51] px-3 py-1 rounded-full text-white text-sm flex items-center space-x-1">
+                <Brain className="w-4 h-4" />
+                <span>AI baked in</span>
+              </div>
+            )}
+            {aiEnabled && !isBakingAI && (
+              <div className="bg-black/60 px-3 py-1 rounded-full text-white text-xs flex items-center space-x-1">
+                <Brain className="w-3 h-3" />
+                <span>AI applies to the next take</span>
+              </div>
+            )}
           </div>
         )}
         
@@ -1297,6 +1606,12 @@ export const VideoRecorder: React.FC = () => {
                   onFeatureToggle={toggleFeature}
                   isProcessing={isProcessing}
                 />
+
+                <p className="text-xs text-gray-500">
+                  {aiEnabled
+                    ? 'Enabled effects are rendered into the recording itself – what you see in the preview is what gets saved.'
+                    : 'Enable a feature to render it straight into the recording.'}
+                </p>
               </div>
             </motion.div>
           )}

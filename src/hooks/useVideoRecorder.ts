@@ -187,6 +187,45 @@ export const mixAudioTracks = (tracks: MediaStreamTrack[]): MixedAudio | null =>
   }
 };
 
+/**
+ * Builds the stream handed to MediaRecorder when an effect pipeline (AI
+ * features, overlays, …) is baked into the take: the picture comes from the
+ * canvas the effects are drawn on, the sound from the tracks the caller
+ * already captured (the mixed system+mic track for screen/PiP recordings, the
+ * selected microphone otherwise).
+ *
+ * The canvas must already hold a correctly sized frame – `captureStream()`
+ * freezes the track dimensions at capture time. Returns `null` when the
+ * browser cannot capture a canvas, so callers can fall back to the raw stream.
+ */
+export const createCanvasRecordingStream = (
+  canvas: HTMLCanvasElement,
+  audioTracks: MediaStreamTrack[] = [],
+  frameRate = 30
+): MediaStream | null => {
+  if (typeof canvas.captureStream !== 'function') return null;
+
+  try {
+    const canvasStream = canvas.captureStream(frameRate > 0 ? frameRate : 30);
+    const videoTracks = canvasStream.getVideoTracks();
+
+    if (videoTracks.length === 0) {
+      canvasStream.getTracks().forEach(track => track.stop());
+      return null;
+    }
+
+    // MediaRecorder only keeps the first audio track – anything that needed
+    // mixing has already been reduced to a single track by `mixAudioTracks`.
+    return new MediaStream([
+      ...videoTracks,
+      ...audioTracks.filter(track => track.readyState === 'live')
+    ]);
+  } catch (err) {
+    console.warn('Canvas capture is unavailable, recording the raw stream instead:', err);
+    return null;
+  }
+};
+
 export const useVideoRecorder = (): UseVideoRecorderReturn => {
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
