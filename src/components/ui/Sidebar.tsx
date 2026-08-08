@@ -26,16 +26,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
       )}
     >
       <button
+        type="button"
         onClick={() => setIsCollapsed(!isCollapsed)}
+        aria-expanded={!isCollapsed}
+        aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         className={cn(
-          "absolute top-4 bg-white rounded-full p-1.5 shadow-lg border border-gray-200",
+          "absolute top-4 bg-white rounded-full p-1.5 shadow-lg border border-gray-200 z-10",
           position === 'right' ? "-left-4" : "-right-4"
         )}
       >
         {position === 'right' ? (
-          isCollapsed ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />
+          isCollapsed ? <ChevronLeft className="w-4 h-4" aria-hidden="true" /> : <ChevronRight className="w-4 h-4" aria-hidden="true" />
         ) : (
-          isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />
+          isCollapsed ? <ChevronRight className="w-4 h-4" aria-hidden="true" /> : <ChevronLeft className="w-4 h-4" aria-hidden="true" />
         )}
       </button>
 

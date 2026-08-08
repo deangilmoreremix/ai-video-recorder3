@@ -1,10 +1,5 @@
 import React, { useState } from 'react';
-import { 
-  Type, Languages, Users, Settings, Mic, Wand2, Clock, 
-  Edit2, Download, Upload, Globe, Brain, Palette, Layout,
-  Volume2, MessageSquare, Layers, Sliders, Plus, Trash2,
-  AlignLeft, AlignCenter, AlignRight, Move, Save
-} from 'lucide-react';
+import { Users, Settings, Mic, Wand2, Clock, Edit2, Download, Upload, Palette, Plus, Trash2, AlignLeft, AlignCenter, AlignRight } from 'lucide-react';
 import { Tooltip } from '../ui/Tooltip';
 import { nanoid } from 'nanoid';
 
@@ -44,19 +39,7 @@ export const Captions: React.FC = () => {
     }
   });
 
-  const [selectedLanguages, setSelectedLanguages] = useState(['en']);
   const [showStyleEditor, setShowStyleEditor] = useState(false);
-
-  const languages = [
-    { code: 'en', name: 'English' },
-    { code: 'es', name: 'Spanish' },
-    { code: 'fr', name: 'French' },
-    { code: 'de', name: 'German' },
-    { code: 'it', name: 'Italian' },
-    { code: 'ja', name: 'Japanese' },
-    { code: 'ko', name: 'Korean' },
-    { code: 'zh', name: 'Chinese' }
-  ];
 
   const generateCaptions = async () => {
     setProcessing(true);

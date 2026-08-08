@@ -1,10 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { 
-  Film, Upload, Trash2, Edit2, Clock, Layout, Sliders, Play, 
-  Pause, Maximize2, Volume2, Move, RotateCcw, Crop, Eye,
-  PictureInPicture, Layers, Copy, ChevronRight, ChevronLeft,
-  Palette, Music, Video, Image
-} from 'lucide-react';
+import { Film, Upload, Trash2, Edit2, Layout, Sliders, Play, Copy, Music, Video, Image } from 'lucide-react';
 
 interface BRollClip {
   id: string;
@@ -49,10 +44,9 @@ interface BRollClip {
 
 export const BRoll: React.FC = () => {
   const [clips, setClips] = useState<BRollClip[]>([]);
-  const [draggedClip, setDraggedClip] = useState<string | null>(null);
+  const [, setDraggedClip] = useState<string | null>(null);
   const [selectedClip, setSelectedClip] = useState<string | null>(null);
   const [previewMode, setPreviewMode] = useState<'grid' | 'list'>('grid');
-  const [isPlaying, setIsPlaying] = useState(false);
   const [currentCategory, setCurrentCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);

@@ -1,7 +1,5 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { 
-  Layout, Plus, Link, Video, Box, Eye, Youtube
-} from 'lucide-react';
+import { Layout, Link, Video, Box, Eye, Youtube } from 'lucide-react';
 import { Tooltip } from '../../ui/Tooltip';
 import { AnimatePresence } from 'framer-motion';
 import { nanoid } from 'nanoid';

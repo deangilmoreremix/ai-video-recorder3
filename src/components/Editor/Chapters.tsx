@@ -1,9 +1,5 @@
 import React, { useState } from 'react';
-import { 
-  BookOpen, Plus, Clock, Edit2, Trash2, ChevronUp, ChevronDown, 
-  Settings, Image, Palette, Move, Save, AlertCircle, Camera,
-  Layout, Type, Link, Eye, EyeOff
-} from 'lucide-react';
+import { BookOpen, Plus, Clock, Edit2, Trash2, ChevronUp, ChevronDown, Settings, Image, Move, Save, Camera, Link, Eye, EyeOff } from 'lucide-react';
 import { Tooltip } from '../ui/Tooltip';
 import { nanoid } from 'nanoid';
 
@@ -470,7 +466,7 @@ export const Chapters: React.FC = () => {
                     <input
                       type="text"
                       value={formatTime(chapter.startTime)}
-                      onChange={(e) => {
+                      onChange={() => {
                         // Add time parsing logic here
                       }}
                       className="w-full rounded-lg border-gray-300 text-sm"
@@ -483,7 +479,7 @@ export const Chapters: React.FC = () => {
                     <input
                       type="text"
                       value={formatTime(chapter.endTime)}
-                      onChange={(e) => {
+                      onChange={() => {
                         // Add time parsing logic here
                       }}
                       className="w-full rounded-lg border-gray-300 text-sm"

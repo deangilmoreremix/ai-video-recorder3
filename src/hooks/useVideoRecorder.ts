@@ -21,6 +21,154 @@ interface UseVideoRecorderReturn {
   error: Error | null;
 }
 
+/**
+ * Ordered list of container/codec combinations we try to record with.
+ * `video/webm;codecs=vp9` is NOT available everywhere (Safari, some mobile
+ * browsers), so we always probe before handing a mimeType to MediaRecorder.
+ */
+export const RECORDING_MIME_CANDIDATES = [
+  'video/webm;codecs=vp9,opus',
+  'video/webm;codecs=vp9',
+  'video/webm;codecs=vp8,opus',
+  'video/webm;codecs=vp8',
+  'video/webm',
+  'video/mp4;codecs=h264,aac',
+  'video/mp4'
+];
+
+/**
+ * Returns the first mimeType supported by this browser, or `undefined` when
+ * none of the candidates are supported (the browser default is then used).
+ */
+export const pickSupportedMimeType = (
+  candidates: string[] = RECORDING_MIME_CANDIDATES
+): string | undefined => {
+  if (typeof MediaRecorder === 'undefined' || typeof MediaRecorder.isTypeSupported !== 'function') {
+    return undefined;
+  }
+
+  return candidates.find(type => {
+    try {
+      return MediaRecorder.isTypeSupported(type);
+    } catch {
+      return false;
+    }
+  });
+};
+
+/**
+ * Creates a MediaRecorder using a supported mimeType, falling back to the
+ * browser default when the negotiated options are rejected.
+ */
+export const createMediaRecorder = (
+  stream: MediaStream,
+  options: Omit<MediaRecorderOptions, 'mimeType'> = {}
+): MediaRecorder => {
+  const mimeType = pickSupportedMimeType();
+
+  try {
+    return new MediaRecorder(stream, mimeType ? { ...options, mimeType } : options);
+  } catch {
+    // Bitrate hints or the chosen codec can still be rejected – never fail hard.
+    return new MediaRecorder(stream);
+  }
+};
+
+/**
+ * Recording needs a secure context (https or localhost) plus MediaRecorder /
+ * mediaDevices support. Returns a user facing message, or `null` when ready.
+ */
+export const getMediaSupportError = (): string | null => {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+    return 'Recording is only available in a browser.';
+  }
+  if (!window.isSecureContext) {
+    return 'Recording requires a secure connection (https) or localhost.';
+  }
+  if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+    return 'This browser does not support camera or microphone capture.';
+  }
+  if (typeof MediaRecorder === 'undefined') {
+    return 'This browser does not support video recording (MediaRecorder).';
+  }
+  return null;
+};
+
+/** Maps getUserMedia / getDisplayMedia failures to user friendly messages. */
+export const getMediaErrorMessage = (err: unknown): string => {
+  const name =
+    typeof err === 'object' && err !== null && 'name' in err
+      ? String((err as { name: unknown }).name)
+      : '';
+
+  switch (name) {
+    case 'NotAllowedError':
+    case 'SecurityError':
+      return 'Permission denied. Allow camera, microphone and screen access in your browser, then try again.';
+    case 'NotFoundError':
+    case 'DevicesNotFoundError':
+      return 'No camera or microphone was found. Connect a device and try again.';
+    case 'OverconstrainedError':
+      return 'The selected camera or microphone does not support the requested settings.';
+    case 'NotReadableError':
+    case 'TrackStartError':
+      return 'Your camera or microphone is already in use by another application.';
+    case 'AbortError':
+      return 'Recording was cancelled before it started.';
+    default:
+      return err instanceof Error && err.message
+        ? err.message
+        : 'Something went wrong while accessing your media devices.';
+  }
+};
+
+export interface MixedAudio {
+  track: MediaStreamTrack;
+  close: () => void;
+}
+
+/**
+ * MediaRecorder only records the first audio track of a stream, so screen +
+ * microphone audio must be mixed down to a single track. Returns `null` when
+ * mixing is unnecessary (< 2 tracks) or unsupported.
+ */
+export const mixAudioTracks = (tracks: MediaStreamTrack[]): MixedAudio | null => {
+  const liveTracks = tracks.filter(track => track.kind === 'audio' && track.readyState === 'live');
+  if (liveTracks.length < 2) return null;
+
+  const AudioContextCtor =
+    window.AudioContext ||
+    (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AudioContextCtor) return null;
+
+  let context: AudioContext | null = null;
+  try {
+    context = new AudioContextCtor();
+    const destination = context.createMediaStreamDestination();
+    liveTracks.forEach(track => {
+      context!.createMediaStreamSource(new MediaStream([track])).connect(destination);
+    });
+
+    const [mixedTrack] = destination.stream.getAudioTracks();
+    if (!mixedTrack) {
+      context.close().catch(() => undefined);
+      return null;
+    }
+
+    const audioContext = context;
+    return {
+      track: mixedTrack,
+      close: () => {
+        mixedTrack.stop();
+        audioContext.close().catch(() => undefined);
+      }
+    };
+  } catch {
+    context?.close().catch(() => undefined);
+    return null;
+  }
+};
+
 export const useVideoRecorder = (): UseVideoRecorderReturn => {
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
@@ -30,104 +178,208 @@ export const useVideoRecorder = (): UseVideoRecorderReturn => {
 
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const recordedChunks = useRef<Blob[]>([]);
-  const timerInterval = useRef<number>();
-
-  const startTimer = useCallback(() => {
-    timerInterval.current = window.setInterval(() => {
-      setRecordingTime(prev => prev + 1);
-    }, 1000);
-  }, []);
+  const timerInterval = useRef<number | null>(null);
+  // Refs mirror the stream/mixer so unmount cleanup never depends on state.
+  const streamRef = useRef<MediaStream | null>(null);
+  // Source streams (screen, webcam, mic) – the recorded stream may only hold a
+  // subset of their tracks, so they need to be released separately.
+  const sourceStreamsRef = useRef<MediaStream[]>([]);
+  const audioMixRef = useRef<MixedAudio | null>(null);
 
   const stopTimer = useCallback(() => {
-    if (timerInterval.current) {
-      clearInterval(timerInterval.current);
+    if (timerInterval.current !== null) {
+      window.clearInterval(timerInterval.current);
+      timerInterval.current = null;
     }
   }, []);
 
-  const getMediaStream = async (mode: 'webcam' | 'screen' | 'pip'): Promise<MediaStream> => {
-    try {
+  const startTimer = useCallback((maxDuration?: number) => {
+    stopTimer();
+    timerInterval.current = window.setInterval(() => {
+      setRecordingTime(prev => {
+        const next = prev + 1;
+        if (maxDuration && next >= maxDuration && mediaRecorder.current?.state === 'recording') {
+          mediaRecorder.current.stop();
+        }
+        return next;
+      });
+    }, 1000);
+  }, [stopTimer]);
+
+  const releaseStream = useCallback(() => {
+    streamRef.current?.getTracks().forEach(track => track.stop());
+    streamRef.current = null;
+    sourceStreamsRef.current.forEach(source => {
+      source.getTracks().forEach(track => track.stop());
+    });
+    sourceStreamsRef.current = [];
+    audioMixRef.current?.close();
+    audioMixRef.current = null;
+    setVideoStream(null);
+  }, []);
+
+  const getMediaStream = useCallback(
+    async (mode: 'webcam' | 'screen' | 'pip'): Promise<MediaStream> => {
       switch (mode) {
-        case 'screen':
-          return await navigator.mediaDevices.getDisplayMedia({
+        case 'screen': {
+          const screenStream = await navigator.mediaDevices.getDisplayMedia({
             video: true,
             audio: true
           });
-        case 'pip':
-          const [screenStream, webcamStream] = await Promise.all([
-            navigator.mediaDevices.getDisplayMedia({ video: true, audio: true }),
-            navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-          ]);
+          sourceStreamsRef.current = [screenStream];
+          return screenStream;
+        }
+        case 'pip': {
+          const screenStream = await navigator.mediaDevices.getDisplayMedia({
+            video: true,
+            audio: true
+          });
+
+          let webcamStream: MediaStream | null = null;
+          try {
+            webcamStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+          } catch (err) {
+            // The screen capture already succeeded – release it before bubbling up.
+            screenStream.getTracks().forEach(track => track.stop());
+            throw err;
+          }
+
+          sourceStreamsRef.current = [screenStream, webcamStream];
+
+          const audioTracks = [...screenStream.getAudioTracks(), ...webcamStream.getAudioTracks()];
+          const mixed = mixAudioTracks(audioTracks);
+          audioMixRef.current = mixed;
+
           return new MediaStream([
             ...screenStream.getVideoTracks(),
             ...webcamStream.getVideoTracks(),
-            ...screenStream.getAudioTracks()
+            ...(mixed ? [mixed.track] : audioTracks.slice(0, 1))
           ]);
-        default:
-          return await navigator.mediaDevices.getUserMedia({
+        }
+        default: {
+          const webcamStream = await navigator.mediaDevices.getUserMedia({
             video: true,
             audio: true
           });
-      }
-    } catch (err) {
-      throw new Error(`Failed to get media stream: ${err.message}`);
-    }
-  };
-
-  const startRecording = useCallback(async (options?: RecordingOptions) => {
-    try {
-      const stream = await getMediaStream(options?.mode || 'webcam');
-      setVideoStream(stream);
-
-      mediaRecorder.current = new MediaRecorder(stream, {
-        mimeType: 'video/webm;codecs=vp9'
-      });
-
-      mediaRecorder.current.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          recordedChunks.current.push(event.data);
+          sourceStreamsRef.current = [webcamStream];
+          return webcamStream;
         }
-      };
+      }
+    },
+    []
+  );
 
-      mediaRecorder.current.start();
-      setIsRecording(true);
-      startTimer();
-    } catch (err) {
-      setError(err);
-      throw err;
-    }
-  }, [startTimer]);
-
-  const stopRecording = useCallback(async (): Promise<Blob> => {
-    return new Promise((resolve, reject) => {
-      if (!mediaRecorder.current) {
-        reject(new Error('No recording in progress'));
+  const startRecording = useCallback(
+    async (options?: RecordingOptions) => {
+      if (mediaRecorder.current && mediaRecorder.current.state !== 'inactive') {
         return;
       }
 
-      mediaRecorder.current.onstop = () => {
-        const blob = new Blob(recordedChunks.current, { type: 'video/webm' });
+      const supportError = getMediaSupportError();
+      if (supportError) {
+        const err = new Error(supportError);
+        setError(err);
+        throw err;
+      }
+
+      try {
+        setError(null);
+        recordedChunks.current = [];
+        setRecordingTime(0);
+
+        const stream = await getMediaStream(options?.mode || 'webcam');
+        streamRef.current = stream;
+        setVideoStream(stream);
+
+        const recorder = createMediaRecorder(stream);
+        mediaRecorder.current = recorder;
+
+        recorder.ondataavailable = event => {
+          if (event.data && event.data.size > 0) {
+            recordedChunks.current.push(event.data);
+          }
+        };
+
+        recorder.onerror = () => {
+          setError(new Error('Recording stopped unexpectedly.'));
+          stopTimer();
+          setIsRecording(false);
+          setIsPaused(false);
+          releaseStream();
+        };
+
+        // Screen sharing can be ended from the browser UI – finish cleanly.
+        stream.getVideoTracks().forEach(track => {
+          track.onended = () => {
+            if (mediaRecorder.current && mediaRecorder.current.state !== 'inactive') {
+              mediaRecorder.current.stop();
+            }
+          };
+        });
+
+        // Timeslice keeps memory bounded and guarantees data for long takes.
+        recorder.start(1000);
+        setIsRecording(true);
+        setIsPaused(false);
+        startTimer(options?.maxDuration);
+      } catch (err) {
+        releaseStream();
+        mediaRecorder.current = null;
+        stopTimer();
+        setIsRecording(false);
+        const normalized = new Error(getMediaErrorMessage(err));
+        setError(normalized);
+        throw normalized;
+      }
+    },
+    [getMediaStream, releaseStream, startTimer, stopTimer]
+  );
+
+  const stopRecording = useCallback((): Promise<Blob> => {
+    const recorder = mediaRecorder.current;
+
+    const finalize = (): Blob => {
+      stopTimer();
+      setIsRecording(false);
+      setIsPaused(false);
+      setRecordingTime(0);
+      releaseStream();
+      const type = recorder?.mimeType || recordedChunks.current[0]?.type || 'video/webm';
+      return new Blob(recordedChunks.current, { type });
+    };
+
+    return new Promise<Blob>((resolve, reject) => {
+      if (!recorder || recorder.state === 'inactive') {
+        // Already stopped (e.g. maxDuration hit) – return what we captured.
+        if (recordedChunks.current.length > 0) {
+          resolve(finalize());
+        } else {
+          finalize();
+          reject(new Error('No recording in progress'));
+        }
+        return;
+      }
+
+      recorder.onstop = () => {
+        const blob = finalize();
+        if (blob.size === 0) {
+          reject(new Error('Recording produced no data. Please try again.'));
+          return;
+        }
         resolve(blob);
       };
 
       try {
-        mediaRecorder.current.stop();
-        stopTimer();
-        setIsRecording(false);
-        setIsPaused(false);
-        setRecordingTime(0);
-
-        if (videoStream) {
-          videoStream.getTracks().forEach(track => track.stop());
-          setVideoStream(null);
-        }
+        recorder.stop();
       } catch (err) {
-        reject(err);
+        finalize();
+        reject(err instanceof Error ? err : new Error('Failed to stop the recording.'));
       }
     });
-  }, [videoStream, stopTimer]);
+  }, [releaseStream, stopTimer]);
 
   const pauseRecording = useCallback(() => {
-    if (mediaRecorder.current && mediaRecorder.current.state === 'recording') {
+    if (mediaRecorder.current?.state === 'recording') {
       mediaRecorder.current.pause();
       stopTimer();
       setIsPaused(true);
@@ -135,7 +387,7 @@ export const useVideoRecorder = (): UseVideoRecorderReturn => {
   }, [stopTimer]);
 
   const resumeRecording = useCallback(() => {
-    if (mediaRecorder.current && mediaRecorder.current.state === 'paused') {
+    if (mediaRecorder.current?.state === 'paused') {
       mediaRecorder.current.resume();
       startTimer();
       setIsPaused(false);
@@ -148,17 +400,39 @@ export const useVideoRecorder = (): UseVideoRecorderReturn => {
     setError(null);
   }, []);
 
+  // Mount-only cleanup: depending on `videoStream` here would tear the
+  // recorder down as soon as the stream state was set.
   useEffect(() => {
     return () => {
-      if (mediaRecorder.current && mediaRecorder.current.state !== 'inactive') {
-        mediaRecorder.current.stop();
+      const recorder = mediaRecorder.current;
+      if (recorder) {
+        // Detach handlers first so a late `onstop` cannot update state
+        recorder.ondataavailable = null;
+        recorder.onstop = null;
+        recorder.onerror = null;
+        if (recorder.state !== 'inactive') {
+          try {
+            recorder.stop();
+          } catch {
+            // Ignore – the recorder is being discarded anyway.
+          }
+        }
       }
-      if (videoStream) {
-        videoStream.getTracks().forEach(track => track.stop());
+      mediaRecorder.current = null;
+      if (timerInterval.current !== null) {
+        window.clearInterval(timerInterval.current);
+        timerInterval.current = null;
       }
-      stopTimer();
+      streamRef.current?.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+      sourceStreamsRef.current.forEach(source => {
+        source.getTracks().forEach(track => track.stop());
+      });
+      sourceStreamsRef.current = [];
+      audioMixRef.current?.close();
+      audioMixRef.current = null;
     };
-  }, [videoStream, stopTimer]);
+  }, []);
 
   return {
     isRecording,

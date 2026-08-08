@@ -1,8 +1,5 @@
 import React, { useState } from 'react';
-import { 
-  Scissors, Clock, Layout, Type, Music, Wand2, 
-  Layers, Settings, Film, Download 
-} from 'lucide-react';
+import { Scissors, Clock, Layout, Type, Wand2, Layers, Settings, Film, Download } from 'lucide-react';
 import { Tooltip } from '../ui/Tooltip';
 import { Timeline } from './Timeline';
 import { SilentRemoval } from './SilentRemoval';
@@ -17,7 +14,7 @@ interface VideoEditorProps {
   videoRef: React.RefObject<HTMLVideoElement>;
 }
 
-export const VideoEditor: React.FC<VideoEditorProps> = ({ videoRef }) => {
+export const VideoEditor: React.FC<VideoEditorProps> = () => {
   const [activeTab, setActiveTab] = useState('timeline');
 
   const tabs = [

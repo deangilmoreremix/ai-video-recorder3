@@ -1,18 +1,11 @@
 import React, { useState } from 'react';
-import {
-  Wand2, Droplets, Sun, Contrast, Palette, Sparkles, CloudFog, Wind,
-  Sliders, Layers, Gauge, Fingerprint, Lightbulb, Aperture, Zap, Flame,
-  Snowflake, Rainbow, Filter, Maximize, Save, RotateCcw, Play, Eye,
-  Film, Camera, Brush, Eraser, Pipette, Crop, Shuffle, Undo, Redo,
-  Loader, Download, Upload, Share2, History, Bookmark, Star
-} from 'lucide-react';
+import { Droplets, Sun, Contrast, Palette, Sparkles, CloudFog, Wind, Sliders, Layers, Fingerprint, Aperture, Flame, Snowflake, Rainbow, Filter, Maximize, RotateCcw, Eye, Film, Camera, Brush, Undo, Redo, Loader, Bookmark, Star, type LucideIcon } from 'lucide-react';
 import { Tooltip } from '../ui/Tooltip';
-import { useEditorStore } from '../../store';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useEditorStore, type VideoEffectSettings } from '../../store';
 
 interface EffectPreset {
   name: string;
-  icon: any;
+  icon: LucideIcon;
   description: string;
   settings: {
     brightness: number;
@@ -40,9 +33,9 @@ interface EffectPreset {
 
 export const VideoEffects: React.FC = () => {
   const { videoEffects, updateVideoEffects } = useEditorStore();
-  const [activeEffect, setActiveEffect] = useState<string | null>(null);
+  const [, setActiveEffect] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(false);
-  const [history, setHistory] = useState<any[]>([]);
+  const [history, setHistory] = useState<VideoEffectSettings[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [isSaving, setIsSaving] = useState(false);
   const [favorites, setFavorites] = useState<string[]>([]);
@@ -185,7 +178,7 @@ export const VideoEffects: React.FC = () => {
     addToHistory(prevSettings);
   };
 
-  const addToHistory = (settings: any) => {
+  const addToHistory = (settings: VideoEffectSettings) => {
     const newHistory = [...history.slice(0, historyIndex + 1), settings];
     setHistory(newHistory);
     setHistoryIndex(newHistory.length - 1);
@@ -343,7 +336,7 @@ export const VideoEffects: React.FC = () => {
                         <span className="text-sm font-medium">{effect.name}</span>
                       </div>
                       <span className="text-sm text-gray-500">
-                        {Math.round(videoEffects[effect.param] * 100)}%
+                        {Math.round((videoEffects as unknown as Record<string, number>)[effect.param] * 100)}%
                       </span>
                     </div>
                     <div className="relative">
@@ -352,7 +345,7 @@ export const VideoEffects: React.FC = () => {
                         min={effect.min}
                         max={effect.max}
                         step={effect.step}
-                        value={videoEffects[effect.param]}
+                        value={(videoEffects as unknown as Record<string, number>)[effect.param]}
                         onChange={(e) => {
                           const newValue = parseFloat(e.target.value);
                           const prevSettings = { ...videoEffects };

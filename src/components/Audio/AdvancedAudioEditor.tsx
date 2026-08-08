@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 import WaveSurfer from 'wavesurfer.js';
-import { Volume2, VolumeX, Music, Mic, Waveform } from 'lucide-react';
+import { Music, AudioWaveform } from 'lucide-react';
 
 interface AudioTrack {
   id: string;
@@ -43,7 +43,6 @@ export const AdvancedAudioEditor: React.FC = () => {
           cursorColor: '#312e81',
           barWidth: 2,
           barRadius: 3,
-          responsive: true,
           height: 60,
         });
         wavesurfer.load(track.url);
@@ -83,7 +82,7 @@ export const AdvancedAudioEditor: React.FC = () => {
                     wavesurfer?.playPause();
                   }}
                 >
-                  <Waveform className="w-4 h-4" />
+                  <AudioWaveform className="w-4 h-4" />
                 </button>
                 <span className="text-sm font-medium">Track {track.id}</span>
               </div>

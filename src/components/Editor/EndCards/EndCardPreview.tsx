@@ -1,5 +1,5 @@
 import React from 'react';
-import { motion } from 'framer-motion';
+import { motion, type MotionProps } from 'framer-motion';
 import { Eye, EyeOff, Copy, Trash2 } from 'lucide-react';
 import type { EndCard } from './types';
 
@@ -10,7 +10,7 @@ interface EndCardPreviewProps {
   onUpdate: (id: string, updates: Partial<EndCard>) => void;
   onDuplicate: (id: string) => void;
   onRemove: (id: string) => void;
-  animations: Record<string, any>;
+  animations: Record<EndCard['style']['animation'], MotionProps>;
 }
 
 export const EndCardPreview: React.FC<EndCardPreviewProps> = ({

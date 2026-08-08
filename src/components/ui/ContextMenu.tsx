@@ -26,24 +26,34 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
 
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
-    const x = e.clientX;
-    const y = e.clientY;
+    // Keep the menu inside the viewport (rough estimate, refined below)
+    const menuWidth = menuRef.current?.offsetWidth ?? 160;
+    const menuHeight = menuRef.current?.offsetHeight ?? items.length * 36 + 8;
+    const x = Math.min(e.clientX, Math.max(0, window.innerWidth - menuWidth - 8));
+    const y = Math.min(e.clientY, Math.max(0, window.innerHeight - menuHeight - 8));
     setPosition({ x, y });
     setIsOpen(true);
   };
 
-  const handleClickOutside = (e: MouseEvent) => {
-    if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-      setIsOpen(false);
-    }
-  };
-
   useEffect(() => {
-    if (isOpen) {
-      document.addEventListener('click', handleClickOutside);
-    }
+    if (!isOpen) return;
+
+    // Declared inside the effect so add/remove always use the same reference
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsOpen(false);
+    };
+
+    document.addEventListener('click', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
     return () => {
       document.removeEventListener('click', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
     };
   }, [isOpen]);
 
@@ -53,6 +63,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
       {isOpen && (
         <div
           ref={menuRef}
+          role="menu"
           style={{
             position: 'fixed',
             top: position.y,
@@ -64,6 +75,8 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
           {items.map((item, index) => (
             <button
               key={index}
+              type="button"
+              role="menuitem"
               onClick={() => {
                 item.onClick();
                 setIsOpen(false);

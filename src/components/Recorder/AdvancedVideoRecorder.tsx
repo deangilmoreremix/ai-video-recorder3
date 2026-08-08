@@ -1,11 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { 
-  Video, Upload, Volume2, VolumeX, Maximize2, Minimize2,
-  Play, Pause, Square, Brain, Camera, Monitor, Layout,
-  Settings, HelpCircle, Download, Save, Mic, MicOff,
-  ChevronDown, Sliders, RefreshCw, Eye, X
-} from 'lucide-react';
+import { Video, Upload, Volume2, Play, Pause, Square, Brain, Camera, Monitor, Layout, Settings, Mic, MicOff, Sliders, RefreshCw, X, AlertCircle } from 'lucide-react';
 import { useAIFeatures } from '../../hooks/useAIFeatures';
+import {
+  createMediaRecorder,
+  getMediaErrorMessage,
+  getMediaSupportError,
+  mixAudioTracks,
+  MixedAudio
+} from '../../hooks/useVideoRecorder';
 import { AIFeatureGrid } from '../AI/AIFeatureGrid';
 import { AIVideoFeatures } from '../AI/AIVideoFeatures';
 import { AIProcessingOverlay } from '../AI/AIProcessingOverlay';
@@ -33,6 +35,7 @@ export const AdvancedVideoRecorder: React.FC = () => {
   const [showDownloadDialog, setShowDownloadDialog] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Audio state
   const [audioDevices, setAudioDevices] = useState<AudioDevice[]>([]);
@@ -49,24 +52,67 @@ export const AdvancedVideoRecorder: React.FC = () => {
   // AI state
   const [showAIFeatures, setShowAIFeatures] = useState(false);
   const [videoProcessed, setVideoProcessed] = useState(false);
-  const [processedVideoUrl, setProcessedVideoUrl] = useState<string | null>(null);
   const [showFullAI, setShowFullAI] = useState(false);
+  
+  // Recording details
+  const [recordingTitle, setRecordingTitle] = useState('');
+  const [recordingTags, setRecordingTags] = useState<string[]>([]);
+  const [recordingFolder, setRecordingFolder] = useState<string | null>(null);
 
   // Refs
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
-  const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const timerIntervalRef = useRef<number | null>(null);
+  const audioMixRef = useRef<MixedAudio | null>(null);
+  // Source streams (screen, webcam, mic) – the recorded stream only holds a
+  // subset of their tracks, so they need to be released separately.
+  const sourceStreamsRef = useRef<MediaStream[]>([]);
+  const localVideoUrlRef = useRef<string | null>(null);
 
   // AI Features
-  const { features, toggleFeature, loadModels, isModelsLoaded } = useAIFeatures();
+  const { features, toggleFeature, loadModels } = useAIFeatures();
 
   // Format recording time
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60).toString().padStart(2, '0');
     const secs = Math.floor(seconds % 60).toString().padStart(2, '0');
     return `${mins}:${secs}`;
+  };
+
+  const stopTimer = () => {
+    if (timerIntervalRef.current !== null) {
+      window.clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = null;
+    }
+  };
+
+  const startTimer = () => {
+    stopTimer();
+    timerIntervalRef.current = window.setInterval(() => {
+      setRecordingTime(prevTime => prevTime + 1);
+    }, 1000);
+  };
+
+  // Release every capture track (camera, mic, screen) plus the audio mixer
+  const releaseStream = () => {
+    streamRef.current?.getTracks().forEach(track => track.stop());
+    streamRef.current = null;
+    sourceStreamsRef.current.forEach(source => {
+      source.getTracks().forEach(track => track.stop());
+    });
+    sourceStreamsRef.current = [];
+    audioMixRef.current?.close();
+    audioMixRef.current = null;
+  };
+
+  // Replace the <video> source with a local object URL, revoking the previous one
+  const setLocalVideoUrl = (url: string | null) => {
+    if (localVideoUrlRef.current) {
+      URL.revokeObjectURL(localVideoUrlRef.current);
+    }
+    localVideoUrlRef.current = url;
   };
 
   // Load AI models
@@ -78,10 +124,19 @@ export const AdvancedVideoRecorder: React.FC = () => {
 
   // Get available devices
   useEffect(() => {
+    const supportError = getMediaSupportError();
+    if (supportError) {
+      setError(supportError);
+      return;
+    }
+
+    let cancelled = false;
+
     const getDevices = async () => {
       try {
         const devices = await navigator.mediaDevices.enumerateDevices();
-        
+        if (cancelled) return;
+
         const audioInputs = devices
           .filter(device => device.kind === 'audioinput')
           .map(device => ({
@@ -99,74 +154,116 @@ export const AdvancedVideoRecorder: React.FC = () => {
         setVideoDevices(videoInputs);
         
         // Set default devices if available
-        if (!selectedMicId && audioInputs.length > 0) {
-          setSelectedMicId(audioInputs[0].deviceId);
-        }
-        if (!selectedCameraId && videoInputs.length > 0) {
-          setSelectedCameraId(videoInputs[0].deviceId);
-        }
-      } catch (error) {
-        console.error('Error getting media devices:', error);
+        setSelectedMicId(prev => prev || audioInputs[0]?.deviceId || '');
+        setSelectedCameraId(prev => prev || videoInputs[0]?.deviceId || '');
+      } catch (err) {
+        console.error('Error getting media devices:', err);
       }
     };
 
     getDevices();
     navigator.mediaDevices.addEventListener('devicechange', getDevices);
     return () => {
+      cancelled = true;
       navigator.mediaDevices.removeEventListener('devicechange', getDevices);
     };
   }, []);
 
-  // Clean up streams when component unmounts
+  // Clean up streams, timers and object URLs when component unmounts
   useEffect(() => {
     return () => {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-      }
-      if (timerIntervalRef.current) {
-        clearInterval(timerIntervalRef.current);
-      }
-      if (processedVideoUrl) {
-        URL.revokeObjectURL(processedVideoUrl);
-      }
-    };
-  }, [processedVideoUrl]);
-
-  // Setup initial webcam preview
-  useEffect(() => {
-    const setupInitialPreview = async () => {
-      try {
-        if (!videoRef.current || videoRef.current.srcObject) return;
-        
-        // Only set up preview if we have camera and mic permissions
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({ 
-            video: selectedCameraId ? { deviceId: { exact: selectedCameraId } } : true,
-            audio: false // No audio needed for preview
-          });
-          
-          if (videoRef.current) {
-            videoRef.current.srcObject = stream;
-            streamRef.current = stream;
+      const recorder = mediaRecorderRef.current;
+      if (recorder) {
+        // Detach handlers first so a late `onstop` cannot update state
+        recorder.ondataavailable = null;
+        recorder.onstop = null;
+        recorder.onerror = null;
+        if (recorder.state !== 'inactive') {
+          try {
+            recorder.stop();
+          } catch {
+            // The recorder is being discarded anyway
           }
-        } catch (err) {
-          console.error('Error setting up initial preview:', err);
         }
-      } catch (err) {
-        console.error('Error setting up initial preview:', err);
+      }
+      mediaRecorderRef.current = null;
+
+      if (timerIntervalRef.current !== null) {
+        window.clearInterval(timerIntervalRef.current);
+        timerIntervalRef.current = null;
+      }
+
+      streamRef.current?.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+      sourceStreamsRef.current.forEach(source => {
+        source.getTracks().forEach(track => track.stop());
+      });
+      sourceStreamsRef.current = [];
+      audioMixRef.current?.close();
+      audioMixRef.current = null;
+
+      if (localVideoUrlRef.current) {
+        URL.revokeObjectURL(localVideoUrlRef.current);
+        localVideoUrlRef.current = null;
       }
     };
-    
-    setupInitialPreview();
-  }, [selectedCameraId]);
+  }, []);
+
+  // Setup webcam preview (re-runs when another camera is selected)
+  useEffect(() => {
+    if (isRecording || recordedBlob || localVideoUrlRef.current) return;
+    if (getMediaSupportError()) return;
+
+    let cancelled = false;
+
+    const setupPreview = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: selectedCameraId ? { deviceId: { exact: selectedCameraId } } : true,
+          audio: false // No audio needed for preview
+        });
+
+        if (cancelled || !videoRef.current) {
+          stream.getTracks().forEach(track => track.stop());
+          return;
+        }
+
+        // Release the previous preview before attaching the new one
+        if (streamRef.current && streamRef.current !== stream) {
+          streamRef.current.getTracks().forEach(track => track.stop());
+        }
+        streamRef.current = stream;
+        videoRef.current.srcObject = stream;
+        videoRef.current.play().catch(() => undefined);
+      } catch (err) {
+        // A missing permission here is not fatal – recording asks again later
+        console.error('Error setting up camera preview:', err);
+      }
+    };
+
+    setupPreview();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCameraId, isRecording, recordedBlob]);
 
   const startRecording = async () => {
+    const supportError = getMediaSupportError();
+    if (supportError) {
+      setError(supportError);
+      return;
+    }
+
+    setError(null);
     setIsProcessing(true);
     chunksRef.current = [];
     setRecordingTime(0);
-    
+
+    let stream: MediaStream | null = null;
+    const acquired: MediaStream[] = [];
+
     try {
-      let stream: MediaStream;
       const audioConstraints = {
         deviceId: selectedMicId ? { exact: selectedMicId } : undefined,
         echoCancellation: true,
@@ -179,7 +276,7 @@ export const AdvancedVideoRecorder: React.FC = () => {
         : true;
 
       switch (recordingMode) {
-        case 'screen':
+        case 'screen': {
           const screenStream = await navigator.mediaDevices.getDisplayMedia({ 
             video: { 
               frameRate: { ideal: 30 },
@@ -188,209 +285,270 @@ export const AdvancedVideoRecorder: React.FC = () => {
             },
             audio: true 
           });
-          
-          let micStream;
+          acquired.push(screenStream);
+
+          let micStream: MediaStream | null = null;
           try {
             micStream = await navigator.mediaDevices.getUserMedia({ 
               audio: audioConstraints 
             });
+            acquired.push(micStream);
           } catch (err) {
-            console.warn('Unable to access microphone, recording without audio:', err);
+            console.warn('Unable to access microphone, recording without it:', err);
           }
-          
-          const screenTracks = screenStream.getTracks();
-          const audioTracks = micStream ? micStream.getAudioTracks() : [];
-          
+
+          const audioTracks = [
+            ...screenStream.getAudioTracks(),
+            ...(micStream ? micStream.getAudioTracks() : [])
+          ];
+          if (isMicMuted && micStream) {
+            micStream.getAudioTracks().forEach(track => { track.enabled = false; });
+          }
+
+          // MediaRecorder only keeps the first audio track – mix system + mic audio
+          audioMixRef.current = mixAudioTracks(audioTracks);
+
           stream = new MediaStream([
-            ...screenTracks,
-            ...audioTracks
+            ...screenStream.getVideoTracks(),
+            ...(audioMixRef.current ? [audioMixRef.current.track] : audioTracks.slice(0, 1))
           ]);
           break;
-          
-        case 'pip':
+        }
+
+        case 'pip': {
+          const displayStream = await navigator.mediaDevices.getDisplayMedia({ 
+            video: {
+              frameRate: { ideal: 30 },
+              width: { ideal: 1920 },
+              height: { ideal: 1080 }
+            },
+            audio: true 
+          });
+          acquired.push(displayStream);
+
+          let webcamStream: MediaStream;
           try {
-            const [displayStream, webcamStream] = await Promise.all([
-              navigator.mediaDevices.getDisplayMedia({ 
-                video: {
-                  frameRate: { ideal: 30 },
-                  width: { ideal: 1920 },
-                  height: { ideal: 1080 }
-                },
-                audio: true 
-              }),
-              navigator.mediaDevices.getUserMedia({ 
-                video: videoConstraints,
-                audio: audioConstraints 
-              })
-            ]);
-            
-            // We'll keep webcam video and screen audio
-            const screenAudioTracks = displayStream.getAudioTracks();
-            const webcamVideoTracks = webcamStream.getVideoTracks();
-            const webcamAudioTracks = webcamStream.getAudioTracks();
-            
-            stream = new MediaStream([
-              ...webcamVideoTracks,
-              ...screenAudioTracks,
-              ...webcamAudioTracks
-            ]);
+            webcamStream = await navigator.mediaDevices.getUserMedia({ 
+              video: videoConstraints,
+              audio: audioConstraints 
+            });
+            acquired.push(webcamStream);
           } catch (err) {
-            console.error('Error setting up PiP mode:', err);
-            throw new Error('Failed to set up Picture-in-Picture mode. Please try again.');
+            // Screen capture already succeeded – never leave it running
+            displayStream.getTracks().forEach(track => track.stop());
+            throw err;
           }
+
+          if (isMicMuted) {
+            webcamStream.getAudioTracks().forEach(track => { track.enabled = false; });
+          }
+
+          // We keep the webcam video plus a single mixed audio track
+          const audioTracks = [
+            ...displayStream.getAudioTracks(),
+            ...webcamStream.getAudioTracks()
+          ];
+          audioMixRef.current = mixAudioTracks(audioTracks);
+
+          stream = new MediaStream([
+            ...webcamStream.getVideoTracks(),
+            ...(audioMixRef.current ? [audioMixRef.current.track] : audioTracks.slice(0, 1))
+          ]);
           break;
-          
-        default: // webcam
+        }
+
+        default: { // webcam
           stream = await navigator.mediaDevices.getUserMedia({ 
             video: videoConstraints,
             audio: audioConstraints
           });
+          acquired.push(stream);
+          if (isMicMuted) {
+            stream.getAudioTracks().forEach(track => { track.enabled = false; });
+          }
           break;
+        }
       }
 
-      // Store the stream for cleanup
+      // Store the stream for cleanup, releasing the preview stream first
+      if (streamRef.current && streamRef.current !== stream) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
       streamRef.current = stream;
+      sourceStreamsRef.current = acquired;
 
       // Set up video preview
       if (videoRef.current) {
+        setLocalVideoUrl(null);
+        videoRef.current.removeAttribute('src');
         videoRef.current.srcObject = stream;
         videoRef.current.muted = true; // Mute to prevent feedback
-        videoRef.current.play();
+        videoRef.current.play().catch(() => undefined);
       }
 
-      // Set up media recorder with options for better quality
-      const options = { 
-        mimeType: 'video/webm;codecs=vp9,opus',
+      // Codec support differs per browser – only pass a mimeType we probed
+      const mediaRecorder = createMediaRecorder(stream, {
         videoBitsPerSecond: 2500000, // 2.5 Mbps
         audioBitsPerSecond: 128000 // 128 kbps
-      };
-      
-      try {
-        const mediaRecorder = new MediaRecorder(stream, options);
-        mediaRecorderRef.current = mediaRecorder;
-      } catch (e) {
-        // Fallback if vp9 is not supported
-        console.log('VP9 not supported, falling back to default codec');
-        const mediaRecorder = new MediaRecorder(stream);
-        mediaRecorderRef.current = mediaRecorder;
-      }
+      });
+      mediaRecorderRef.current = mediaRecorder;
 
       // Set up data handler
-      mediaRecorderRef.current.ondataavailable = (e) => {
-        if (e.data.size > 0) {
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
           chunksRef.current.push(e.data);
         }
       };
 
+      mediaRecorder.onerror = () => {
+        setError('Recording stopped unexpectedly. Please try again.');
+        stopTimer();
+        releaseStream();
+        setIsRecording(false);
+        setIsPaused(false);
+      };
+
       // Handle recording completion
-      mediaRecorderRef.current.onstop = () => {
-        // Create final video blob
-        const mimeType = mediaRecorderRef.current?.mimeType || 'video/webm';
-        const blob = new Blob(chunksRef.current, { type: mimeType });
-        setRecordedBlob(blob);
-        
+      mediaRecorder.onstop = () => {
         // Clean up recording resources
-        if (timerIntervalRef.current) {
-          clearInterval(timerIntervalRef.current);
-          timerIntervalRef.current = null;
+        stopTimer();
+        releaseStream();
+        setIsRecording(false);
+        setIsPaused(false);
+
+        // Create final video blob using the codec the browser actually used
+        const mimeType = mediaRecorder.mimeType || chunksRef.current[0]?.type || 'video/webm';
+        const blob = new Blob(chunksRef.current, { type: mimeType });
+        chunksRef.current = [];
+
+        if (blob.size === 0) {
+          setError('The recording produced no data. Please try again.');
+          return;
         }
-        
-        // Stop tracks
-        if (streamRef.current) {
-          streamRef.current.getTracks().forEach(track => track.stop());
-          streamRef.current = null;
-        }
-        
+
+        setRecordedBlob(blob);
+
+        // Set default title based on date and time
+        const now = new Date();
+        setRecordingTitle(`Recording ${now.toLocaleString()}`);
+
+        // Set tags based on mode
+        setRecordingTags([recordingMode]);
+
         // Show download dialog
         setShowDownloadDialog(true);
       };
 
+      // Screen sharing can be ended from the browser UI – finish cleanly
+      stream.getVideoTracks().forEach(track => {
+        track.onended = () => {
+          if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+            mediaRecorderRef.current.stop();
+          }
+        };
+      });
+
       // Start recording
-      mediaRecorderRef.current.start(1000); // Collect data every second
+      mediaRecorder.start(1000); // Collect data every second
       setIsRecording(true);
-      
-      // Start timer
-      timerIntervalRef.current = setInterval(() => {
-        setRecordingTime(prevTime => prevTime + 1);
-      }, 1000);
-      
+      startTimer();
     } catch (err) {
       console.error('Error starting recording:', err);
-      alert(`Failed to start recording: ${err.message}`);
+      stream?.getTracks().forEach(track => track.stop());
+      acquired.forEach(source => source.getTracks().forEach(track => track.stop()));
+      audioMixRef.current?.close();
+      audioMixRef.current = null;
+      setError(getMediaErrorMessage(err));
     } finally {
       setIsProcessing(false);
     }
   };
 
   const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
+    const recorder = mediaRecorderRef.current;
+
+    if (!recorder || recorder.state === 'inactive') {
+      // Nothing to stop – make sure no device is left running
+      stopTimer();
+      releaseStream();
+      setIsRecording(false);
+      setIsPaused(false);
+      return;
+    }
+
+    try {
+      recorder.stop(); // `onstop` finalises the blob and releases the devices
+    } catch (err) {
+      console.error('Error stopping recording:', err);
+      setError(getMediaErrorMessage(err));
+      stopTimer();
+      releaseStream();
       setIsRecording(false);
       setIsPaused(false);
     }
   };
 
   const pauseRecording = () => {
-    if (mediaRecorderRef.current && isRecording && !isPaused) {
+    if (mediaRecorderRef.current?.state === 'recording') {
       mediaRecorderRef.current.pause();
       setIsPaused(true);
-      
-      // Pause timer
-      if (timerIntervalRef.current) {
-        clearInterval(timerIntervalRef.current);
-        timerIntervalRef.current = null;
-      }
+      stopTimer();
     }
   };
 
   const resumeRecording = () => {
-    if (mediaRecorderRef.current && isRecording && isPaused) {
+    if (mediaRecorderRef.current?.state === 'paused') {
       mediaRecorderRef.current.resume();
       setIsPaused(false);
-      
-      // Resume timer
-      timerIntervalRef.current = setInterval(() => {
-        setRecordingTime(prevTime => prevTime + 1);
-      }, 1000);
+      startTimer();
     }
   };
 
-  const handleUpload = (e: React.DragEvent<HTMLDivElement> | React.ChangeEvent<HTMLInputElement>) => {
-    let file: File | null = null;
-    
-    if ('dataTransfer' in e) {
-      file = e.dataTransfer.files[0];
-    } else if (e.target.files) {
-      file = e.target.files[0];
+  const loadLocalFile = (file: File) => {
+    if (!file.type.startsWith('video/')) {
+      setError('Unsupported file type. Please choose a video file.');
+      return;
     }
 
-    if (file && file.type.startsWith('video/')) {
-      const url = URL.createObjectURL(file);
-      
-      // Clean up any previous URL
-      if (processedVideoUrl) {
-        URL.revokeObjectURL(processedVideoUrl);
-        setProcessedVideoUrl(null);
-      }
-      
-      if (videoRef.current) {
-        videoRef.current.srcObject = null;
-        videoRef.current.src = url;
-        videoRef.current.load();
-        videoRef.current.play();
-      }
+    setError(null);
+
+    // Revokes the previously loaded object URL
+    const url = URL.createObjectURL(file);
+    setLocalVideoUrl(url);
+    setVideoProcessed(false);
+
+    // A local file replaces the live preview
+    releaseStream();
+
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+      videoRef.current.src = url;
+      videoRef.current.load();
+      videoRef.current.play().catch(() => undefined);
     }
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files?.[0];
+    if (file) loadLocalFile(file);
+  };
+
+  const handleSelectFile = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'video/*';
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (file) loadLocalFile(file);
+    };
+    input.click();
   };
 
   const handleAIProcessingComplete = (processedBlob: Blob) => {
-    // Clean up any previous URL
-    if (processedVideoUrl) {
-      URL.revokeObjectURL(processedVideoUrl);
-    }
-    
-    // Create URL for processed video
+    // Create URL for processed video (revoking the previous one)
     const url = URL.createObjectURL(processedBlob);
-    setProcessedVideoUrl(url);
+    setLocalVideoUrl(url);
     setVideoProcessed(true);
     
     // Update video player with processed video
@@ -398,13 +556,13 @@ export const AdvancedVideoRecorder: React.FC = () => {
       videoRef.current.srcObject = null;
       videoRef.current.src = url;
       videoRef.current.load();
-      videoRef.current.play();
+      videoRef.current.play().catch(() => undefined);
     }
     
     // Store for potential download
     setRecordedBlob(processedBlob);
   };
-
+  
   return (
     <div className="bg-white rounded-lg shadow-lg p-4">
       <div className="flex items-center justify-between mb-4">
@@ -429,6 +587,21 @@ export const AdvancedVideoRecorder: React.FC = () => {
         </div>
       </div>
 
+      {error && (
+        <div className="mb-4 flex items-start space-x-2 p-3 rounded-lg border border-[#E44E51]/30 
+          bg-[#E44E51]/10 text-sm text-[#E44E51]">
+          <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+          <span className="flex-grow">{error}</span>
+          <button
+            onClick={() => setError(null)}
+            className="p-1 rounded hover:bg-[#E44E51]/10"
+            aria-label="Dismiss error"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       <div className="relative aspect-video bg-gray-900 rounded-lg overflow-hidden mb-4">
         <video
           ref={videoRef}
@@ -444,17 +617,8 @@ export const AdvancedVideoRecorder: React.FC = () => {
             className="absolute inset-0 bg-black/50 opacity-0 hover:opacity-100 
               transition-opacity flex items-center justify-center cursor-pointer z-10"
             onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              e.preventDefault();
-              handleUpload(e);
-            }}
-            onClick={() => {
-              const input = document.createElement('input');
-              input.type = 'file';
-              input.accept = 'video/*';
-              input.onchange = (e) => handleUpload(e as React.ChangeEvent<HTMLInputElement>);
-              input.click();
-            }}
+            onDrop={handleDrop}
+            onClick={handleSelectFile}
           >
             <div className="text-white text-center">
               <Upload className="w-12 h-12 mx-auto mb-2" />
@@ -824,8 +988,8 @@ export const AdvancedVideoRecorder: React.FC = () => {
                 </div>
                 
                 <AIFeatureGrid
-                  features={features}
-                  onToggleFeature={toggleFeature}
+                  enabledFeatures={features}
+                  onFeatureToggle={toggleFeature}
                   isProcessing={isProcessing}
                 />
               </div>
@@ -885,6 +1049,12 @@ export const AdvancedVideoRecorder: React.FC = () => {
         isOpen={showDownloadDialog}
         onClose={() => setShowDownloadDialog(false)}
         recordedBlob={recordedBlob}
+        recordingTitle={recordingTitle}
+        recordingTags={recordingTags}
+        recordingFolder={recordingFolder}
+        onRecordingTitleChange={setRecordingTitle}
+        onRecordingTagsChange={setRecordingTags}
+        onRecordingFolderChange={setRecordingFolder}
       />
     </div>
   );

@@ -25,9 +25,11 @@ const FeatureHighlight: React.FC<FeatureHighlightProps> = ({
   linkUrl,
   reversed = false
 }) => {
-  // Handle image error
+  // Handle image error (guarded so a failing fallback cannot loop forever)
   const handleImageError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
-    console.error(`Failed to load image: ${imgSrc}`);
+    if (e.currentTarget.dataset.fallbackApplied) return;
+    e.currentTarget.dataset.fallbackApplied = 'true';
+    console.warn(`Failed to load image: ${imgSrc}`);
     // Set a fallback image
     e.currentTarget.src = 'https://images.unsplash.com/photo-1581472723648-909f4851d4ae?auto=format&fit=crop&w=1000&q=80';
     e.currentTarget.alt = 'Feature image';
@@ -45,8 +47,9 @@ const FeatureHighlight: React.FC<FeatureHighlightProps> = ({
           <motion.img
             src={imgSrc}
             alt={title}
+            loading="lazy"
             onError={handleImageError}
-            className="rounded-xl shadow-xl"
+            className="rounded-xl shadow-xl w-full"
             whileHover={{ scale: 1.02 }}
             transition={{ duration: 0.3 }}
           />

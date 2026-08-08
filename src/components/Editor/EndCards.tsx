@@ -1,9 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { 
-  Layout, Plus, Link, Image, Video, Clock, Move, Settings, Palette, Trash2,
-  ChevronRight, ChevronLeft, Play, Pause, Eye, EyeOff, Copy, Layers,
-  Youtube, ExternalLink, Maximize2, Minimize2, Box, Sparkles, Wand2
-} from 'lucide-react';
+import { Layout, Link, Video, Trash2, Eye, EyeOff, Copy, Layers, Youtube, ExternalLink, Box, Wand2 } from 'lucide-react';
 import { Tooltip } from '../ui/Tooltip';
 import { motion, AnimatePresence } from 'framer-motion';
 import { nanoid } from 'nanoid';
@@ -296,7 +292,7 @@ export const EndCards: React.FC = () => {
                 y: card.style.hover.translateY,
                 transition: { duration: 0.2 }
               }}
-              onMouseDown={(e) => handleDragStart(e as any, card.id)}
+              onMouseDown={(e) => handleDragStart(e, card.id)}
             >
               <div className="relative w-full h-full p-4">
                 <div className="flex flex-col h-full">
@@ -435,12 +431,16 @@ export const EndCards: React.FC = () => {
               </label>
               <select
                 value={endCards.find(c => c.id === selectedCard)?.style.animation}
-                onChange={(e) => updateEndCard(selectedCard, {
-                  style: {
-                    ...endCards.find(c => c.id === selectedCard)?.style!,
-                    animation: e.target.value as EndCard['style']['animation']
-                  }
-                })}
+                onChange={(e) => {
+                  const style = endCards.find(c => c.id === selectedCard)?.style;
+                  if (!style) return;
+                  updateEndCard(selectedCard, {
+                    style: {
+                      ...style,
+                      animation: e.target.value as EndCard['style']['animation']
+                    }
+                  });
+                }}
                 className="w-full rounded-lg border-gray-300"
               >
                 <option value="fade">Fade</option>
@@ -458,12 +458,16 @@ export const EndCards: React.FC = () => {
                 <input
                   type="color"
                   value={endCards.find(c => c.id === selectedCard)?.style.backgroundColor}
-                  onChange={(e) => updateEndCard(selectedCard, {
-                    style: {
-                      ...endCards.find(c => c.id === selectedCard)?.style!,
-                      backgroundColor: e.target.value
-                    }
-                  })}
+                  onChange={(e) => {
+                    const style = endCards.find(c => c.id === selectedCard)?.style;
+                    if (!style) return;
+                    updateEndCard(selectedCard, {
+                      style: {
+                        ...style,
+                        backgroundColor: e.target.value
+                      }
+                    });
+                  }}
                   className="w-full h-8"
                 />
               </div>
@@ -474,12 +478,16 @@ export const EndCards: React.FC = () => {
                 <input
                   type="color"
                   value={endCards.find(c => c.id === selectedCard)?.style.textColor}
-                  onChange={(e) => updateEndCard(selectedCard, {
-                    style: {
-                      ...endCards.find(c => c.id === selectedCard)?.style!,
-                      textColor: e.target.value
-                    }
-                  })}
+                  onChange={(e) => {
+                    const style = endCards.find(c => c.id === selectedCard)?.style;
+                    if (!style) return;
+                    updateEndCard(selectedCard, {
+                      style: {
+                        ...style,
+                        textColor: e.target.value
+                      }
+                    });
+                  }}
                   className="w-full h-8"
                 />
               </div>

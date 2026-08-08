@@ -7,6 +7,7 @@ interface ToggleProps {
   disabled?: boolean;
   size?: 'sm' | 'md' | 'lg';
   className?: string;
+  label?: string;
 }
 
 export const Toggle: React.FC<ToggleProps> = ({
@@ -14,7 +15,8 @@ export const Toggle: React.FC<ToggleProps> = ({
   onChange,
   disabled = false,
   size = 'md',
-  className
+  className,
+  label
 }) => {
   const sizes = {
     sm: 'w-8 h-5',
@@ -22,19 +24,24 @@ export const Toggle: React.FC<ToggleProps> = ({
     lg: 'w-14 h-7'
   };
 
+  // Full class names (never build them by interpolation - Tailwind only picks
+  // up literal strings, and `after:${'h-5 w-5'}` would leak a bare `w-5`
+  // onto the track element).
   const handleSizes = {
-    sm: 'h-4 w-4',
-    md: 'h-5 w-5',
-    lg: 'h-6 w-6'
+    sm: 'after:h-4 after:w-4',
+    md: 'after:h-5 after:w-5',
+    lg: 'after:h-6 after:w-6'
   };
 
   return (
-    <label className={cn("relative inline-flex items-center cursor-pointer", className)}>
+    <label className={cn("relative inline-flex items-center", disabled ? "cursor-not-allowed" : "cursor-pointer", className)}>
       <input
         type="checkbox"
+        role="switch"
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
         disabled={disabled}
+        aria-label={label}
         className="sr-only peer"
       />
       <div className={cn(
@@ -44,10 +51,12 @@ export const Toggle: React.FC<ToggleProps> = ({
         "peer-checked:after:translate-x-full peer-checked:after:border-white",
         "after:content-[''] after:absolute after:top-[2px] after:left-[2px]",
         "after:bg-white after:border-gray-300 after:border after:rounded-full",
-        `after:${handleSizes[size]} after:transition-all`,
+        handleSizes[size],
+        "after:transition-all",
         "peer-checked:bg-[#E44E51]",
-        disabled && "opacity-50 cursor-not-allowed"
+        disabled && "opacity-50"
       )} />
+      {label && <span className="sr-only">{label}</span>}
     </label>
   );
 };

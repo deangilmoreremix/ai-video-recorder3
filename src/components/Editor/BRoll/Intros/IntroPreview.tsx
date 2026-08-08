@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef } from 'react';
 import { Play, Pause, RotateCcw, Download } from 'lucide-react';
 
 interface IntroPreviewProps {
@@ -14,12 +14,6 @@ interface IntroPreviewProps {
       alignment: string;
       animation: string;
       duration: number;
-    };
-    media: {
-      background: File | null;
-      logo: File | null;
-      music: File | null;
-      volume: number;
     };
   };
 }

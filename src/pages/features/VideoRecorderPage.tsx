@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import { useRef, useEffect } from 'react';
 import { motion, useInView } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { Camera, Monitor, Layout, Mic, Settings, Brain, Sliders, Sparkles, Play, ChevronRight } from 'lucide-react';

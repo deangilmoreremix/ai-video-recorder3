@@ -1,37 +1,41 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as tf from '@tensorflow/tfjs';
 import * as bodySegmentation from '@tensorflow-models/body-segmentation';
-import { Loader, Settings, Camera } from 'lucide-react';
+import { Loader, Settings } from 'lucide-react';
+
+interface BodySegmentationSettings {
+  mode: 'blur' | 'replace' | 'mask' | 'outline';
+  blurAmount: number;
+  backgroundImage: string;
+  backgroundColor: string;
+  foregroundColor: string;
+  outlineWidth: number;
+  maskOpacity: number;
+  segmentationThreshold: number;
+}
+
+const DEFAULT_SETTINGS: BodySegmentationSettings = {
+  mode: 'blur',
+  blurAmount: 10,
+  backgroundImage: '',
+  backgroundColor: '#00FF00',
+  foregroundColor: '#FFFFFF',
+  outlineWidth: 3,
+  maskOpacity: 0.7,
+  segmentationThreshold: 0.5
+};
 
 interface BodySegmentationProps {
   videoRef: React.RefObject<HTMLVideoElement>;
   enabled: boolean;
-  settings?: {
-    mode: 'blur' | 'replace' | 'mask' | 'outline';
-    blurAmount?: number;
-    backgroundImage?: string;
-    backgroundColor?: string;
-    foregroundColor?: string;
-    outlineWidth?: number;
-    maskOpacity?: number;
-    segmentationThreshold?: number;
-  };
+  settings?: Partial<BodySegmentationSettings>;
   onSegmentationComplete?: (maskCanvas: HTMLCanvasElement) => void;
 }
 
 export const BodySegmentation: React.FC<BodySegmentationProps> = ({
   videoRef,
   enabled,
-  settings = {
-    mode: 'blur',
-    blurAmount: 10,
-    backgroundImage: '',
-    backgroundColor: '#00FF00',
-    foregroundColor: '#FFFFFF',
-    outlineWidth: 3,
-    maskOpacity: 0.7,
-    segmentationThreshold: 0.5
-  },
+  settings,
   onSegmentationComplete
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -40,13 +44,57 @@ export const BodySegmentation: React.FC<BodySegmentationProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [localSettings, setLocalSettings] = useState(settings);
+  const [localSettings, setLocalSettings] = useState<BodySegmentationSettings>({
+    ...DEFAULT_SETTINGS,
+    ...settings
+  });
   const requestRef = useRef<number>();
-  const previousTimeRef = useRef<number>();
+  // Guards the render loop: every start gets a unique token so that a chain
+  // whose effect has been cleaned up can never schedule another frame
+  // (two overlapping rAF chains would double the GPU work).
+  const loopTokenRef = useRef<object | null>(null);
+  // Reused offscreen canvases (a new canvas per frame is a fast OOM)
+  const scratchRef = useRef<Map<string, HTMLCanvasElement>>(new Map());
+
+  const mode = settings?.mode;
+  const backgroundImage = settings?.backgroundImage;
+
+  // Keep the local (user editable) settings in sync with the props driven ones
+  useEffect(() => {
+    setLocalSettings(prev => ({
+      ...prev,
+      ...(mode ? { mode } : {}),
+      ...(backgroundImage !== undefined ? { backgroundImage } : {})
+    }));
+  }, [mode, backgroundImage]);
+
+  const getScratchCanvas = useCallback((key: string, width: number, height: number) => {
+    let canvas = scratchRef.current.get(key);
+    if (!canvas) {
+      canvas = document.createElement('canvas');
+      scratchRef.current.set(key, canvas);
+    }
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+    return canvas;
+  }, []);
+
+  // Paints an ImageData mask into a reusable canvas so it can be used as a
+  // compositing source (drawImage does not accept ImageData).
+  const maskToCanvas = useCallback((key: string, mask: ImageData) => {
+    const canvas = getScratchCanvas(key, mask.width, mask.height);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.putImageData(mask, 0, 0);
+    return canvas;
+  }, [getScratchCanvas]);
 
   // Load the model
   useEffect(() => {
     let isMounted = true;
+    let localSegmenter: bodySegmentation.BodySegmenter | null = null;
 
     const loadModel = async () => {
       if (!enabled) return;
@@ -67,9 +115,13 @@ export const BodySegmentation: React.FC<BodySegmentationProps> = ({
           }
         );
 
+        localSegmenter = segmenter;
+
         if (isMounted) {
           setModel(segmenter);
           setIsLoading(false);
+        } else {
+          segmenter.dispose();
         }
         
       } catch (err) {
@@ -81,19 +133,6 @@ export const BodySegmentation: React.FC<BodySegmentationProps> = ({
       }
     };
 
-    // Load background image if provided
-    if (settings.backgroundImage && settings.mode === 'replace') {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = () => {
-        backgroundImageRef.current = img;
-      };
-      img.onerror = () => {
-        console.error('Failed to load background image');
-      };
-      img.src = settings.backgroundImage;
-    }
-
     loadModel();
 
     return () => {
@@ -102,30 +141,66 @@ export const BodySegmentation: React.FC<BodySegmentationProps> = ({
       // Cleanup
       if (requestRef.current) {
         cancelAnimationFrame(requestRef.current);
+        requestRef.current = undefined;
       }
+      loopTokenRef.current = null;
       
-      // Cleanup TensorFlow memory
-      tf.disposeVariables();
+      // Release only this model's memory. `tf.disposeVariables()` is global and
+      // would corrupt any other model still in use.
+      try {
+        localSegmenter?.dispose();
+      } catch (disposeError) {
+        console.warn('Failed to dispose segmentation model:', disposeError);
+      }
+      setModel(null);
     };
-  }, [enabled, settings.backgroundImage, settings.mode]);
+  }, [enabled]);
+
+  // Load background image if provided
+  useEffect(() => {
+    if (!localSettings.backgroundImage || localSettings.mode !== 'replace') {
+      backgroundImageRef.current = null;
+      return;
+    }
+
+    let cancelled = false;
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      if (!cancelled) backgroundImageRef.current = img;
+    };
+    img.onerror = () => {
+      console.error('Failed to load background image');
+    };
+    img.src = localSettings.backgroundImage;
+
+    return () => {
+      cancelled = true;
+      img.onload = null;
+      img.onerror = null;
+      backgroundImageRef.current = null;
+    };
+  }, [localSettings.backgroundImage, localSettings.mode]);
 
   // Process segmentation
-  const processSegmentation = async (time?: number) => {
+  const processSegmentation = useCallback(async (token: object) => {
+    if (loopTokenRef.current !== token) return;
+
     if (!model || !videoRef.current || !canvasRef.current || !enabled || isLoading) {
       return;
     }
 
-    // Skip if video is not ready
-    if (videoRef.current.readyState < 2) {
-      requestRef.current = requestAnimationFrame(processSegmentation);
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+
+    // Skip if video is not ready (videoWidth is 0 until the first frame decodes)
+    if (video.readyState < 2 || !video.videoWidth || !video.videoHeight) {
+      requestRef.current = requestAnimationFrame(() => { void processSegmentation(token); });
       return;
     }
 
     try {
       // Match canvas size to video
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      
       if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
@@ -138,10 +213,13 @@ export const BodySegmentation: React.FC<BodySegmentationProps> = ({
         segmentationThreshold: localSettings.segmentationThreshold
       });
 
-      const ctx = canvas.getContext('2d');
+      const ctx = canvas.getContext('2d', { willReadFrequently: localSettings.mode === 'outline' });
       if (!ctx) return;
 
       // Clear canvas
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.filter = 'none';
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       if (segmentation.length === 0) {
@@ -150,47 +228,43 @@ export const BodySegmentation: React.FC<BodySegmentationProps> = ({
       } else {
         // Process based on selected mode
         switch (localSettings.mode) {
-          case 'blur':
-            // Draw video first
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            
+          case 'blur': {
             // Create foreground mask
             const foregroundMask = await bodySegmentation.toBinaryMask(
               segmentation,
               { r: 0, g: 0, b: 0, a: 0 },
               { r: 0, g: 0, b: 0, a: 255 }
             );
-            
-            // Create background mask (inverted foreground mask)
-            const backgroundMask = await bodySegmentation.toBinaryMask(
-              segmentation,
-              { r: 0, g: 0, b: 0, a: 255 },
-              { r: 0, g: 0, b: 0, a: 0 }
-            );
-            
+
+            const maskCanvas = maskToCanvas('mask', foregroundMask);
+
             // Draw blurred background
             ctx.save();
             ctx.filter = `blur(${localSettings.blurAmount}px)`;
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             ctx.filter = 'none';
-            
-            // Draw original foreground
-            const tempCanvas = document.createElement('canvas');
-            tempCanvas.width = canvas.width;
-            tempCanvas.height = canvas.height;
-            const tempCtx = tempCanvas.getContext('2d');
-            if (tempCtx) {
-              tempCtx.drawImage(video, 0, 0);
-              tempCtx.globalCompositeOperation = 'destination-in';
-              tempCtx.drawImage(foregroundMask, 0, 0);
-              
-              ctx.drawImage(tempCanvas, 0, 0);
+
+            // Draw original foreground on top of the blurred background
+            if (maskCanvas) {
+              const tempCanvas = getScratchCanvas('foreground', canvas.width, canvas.height);
+              const tempCtx = tempCanvas.getContext('2d');
+              if (tempCtx) {
+                tempCtx.globalCompositeOperation = 'source-over';
+                tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
+                tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
+                tempCtx.globalCompositeOperation = 'destination-in';
+                tempCtx.drawImage(maskCanvas, 0, 0, tempCanvas.width, tempCanvas.height);
+                tempCtx.globalCompositeOperation = 'source-over';
+
+                ctx.drawImage(tempCanvas, 0, 0);
+              }
             }
-            
+
             ctx.restore();
             break;
+          }
             
-          case 'replace':
+          case 'replace': {
             // Replace background with image or color
             if (backgroundImageRef.current) {
               // Draw background image
@@ -205,36 +279,39 @@ export const BodySegmentation: React.FC<BodySegmentationProps> = ({
               ctx.fillRect(0, 0, canvas.width, canvas.height);
             }
             
+            // Create foreground mask
+            const fgMask = await bodySegmentation.toBinaryMask(
+              segmentation,
+              { r: 0, g: 0, b: 0, a: 0 },
+              { r: 0, g: 0, b: 0, a: 255 }
+            );
+            const fgMaskCanvas = maskToCanvas('mask', fgMask);
+
             // Draw foreground (person)
-            const foregroundCanvas = document.createElement('canvas');
-            foregroundCanvas.width = canvas.width;
-            foregroundCanvas.height = canvas.height;
+            const foregroundCanvas = getScratchCanvas('foreground', canvas.width, canvas.height);
             const foregroundCtx = foregroundCanvas.getContext('2d');
             
-            if (foregroundCtx) {
-              foregroundCtx.drawImage(video, 0, 0);
+            if (foregroundCtx && fgMaskCanvas) {
+              foregroundCtx.globalCompositeOperation = 'source-over';
+              foregroundCtx.clearRect(0, 0, foregroundCanvas.width, foregroundCanvas.height);
+              foregroundCtx.drawImage(video, 0, 0, foregroundCanvas.width, foregroundCanvas.height);
               foregroundCtx.globalCompositeOperation = 'destination-in';
-              
-              // Create foreground mask
-              const fgMask = await bodySegmentation.toBinaryMask(
-                segmentation,
-                { r: 0, g: 0, b: 0, a: 0 },
-                { r: 0, g: 0, b: 0, a: 255 }
-              );
-              
-              foregroundCtx.drawImage(fgMask, 0, 0);
+              foregroundCtx.drawImage(fgMaskCanvas, 0, 0, foregroundCanvas.width, foregroundCanvas.height);
+              foregroundCtx.globalCompositeOperation = 'source-over';
+
               ctx.drawImage(foregroundCanvas, 0, 0);
             }
             break;
+          }
             
-          case 'outline':
+          case 'outline': {
             // Draw video first
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             
             // Draw outline around person
             const coloredSegmentation = await bodySegmentation.toColoredMask(
               segmentation,
-              bodySegmentation.ColoredMaskType.RAINBOW,
+              bodySegmentation.bodyPixMaskValueToRainbowColor,
               { r: 255, g: 255, b: 255, a: 255 }
             );
             
@@ -242,58 +319,61 @@ export const BodySegmentation: React.FC<BodySegmentationProps> = ({
             ctx.globalCompositeOperation = 'source-over';
             ctx.lineWidth = localSettings.outlineWidth;
             ctx.strokeStyle = localSettings.foregroundColor;
+            ctx.fillStyle = localSettings.foregroundColor;
             
             // Get the segmentation data and trace its outline
             // This is simplified - in a real app you'd need edge detection
-            const compositeCtx = document.createElement('canvas').getContext('2d');
+            const compositeCanvas = getScratchCanvas('composite', coloredSegmentation.width, coloredSegmentation.height);
+            const compositeCtx = compositeCanvas.getContext('2d', { willReadFrequently: true });
             if (compositeCtx) {
-              const compositeCanvas = compositeCtx.canvas;
-              compositeCanvas.width = canvas.width;
-              compositeCanvas.height = canvas.height;
+              compositeCtx.putImageData(coloredSegmentation, 0, 0);
               
-              compositeCtx.drawImage(coloredSegmentation, 0, 0);
-              
-              const imageData = compositeCtx.getImageData(0, 0, canvas.width, canvas.height);
+              const maskWidth = compositeCanvas.width;
+              const maskHeight = compositeCanvas.height;
+              const imageData = compositeCtx.getImageData(0, 0, maskWidth, maskHeight);
               const data = imageData.data;
-              
-              ctx.beginPath();
+              const scaleX = canvas.width / maskWidth;
+              const scaleY = canvas.height / maskHeight;
               
               // Simplified edge detection
-              for (let y = 1; y < canvas.height - 1; y += 2) {
-                for (let x = 1; x < canvas.width - 1; x += 2) {
-                  const idx = (y * canvas.width + x) * 4;
-                  const idxRight = (y * canvas.width + (x + 1)) * 4;
-                  const idxDown = ((y + 1) * canvas.width + x) * 4;
+              for (let y = 1; y < maskHeight - 1; y += 2) {
+                for (let x = 1; x < maskWidth - 1; x += 2) {
+                  const idx = (y * maskWidth + x) * 4;
+                  const idxRight = (y * maskWidth + (x + 1)) * 4;
+                  const idxDown = ((y + 1) * maskWidth + x) * 4;
                   
                   // If current pixel is person and adjacent pixel is not, draw it
                   if (data[idx + 3] > 128) {
                     if (data[idxRight + 3] < 128 || data[idxDown + 3] < 128) {
-                      ctx.fillRect(x - 1, y - 1, 3, 3);
+                      ctx.fillRect((x - 1) * scaleX, (y - 1) * scaleY, 3, 3);
                     }
                   }
                 }
               }
-              
-              ctx.stroke();
             }
             break;
+          }
             
-          case 'mask':
+          case 'mask': {
             // Draw video
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             
             // Create colored mask
             const mask = await bodySegmentation.toColoredMask(
               segmentation,
-              bodySegmentation.ColoredMaskType.RAINBOW,
+              bodySegmentation.bodyPixMaskValueToRainbowColor,
               { r: 255, g: 255, b: 255, a: 0 }
             );
+            const coloredMaskCanvas = maskToCanvas('mask', mask);
             
             // Overlay mask with opacity
-            ctx.globalAlpha = localSettings.maskOpacity;
-            ctx.drawImage(mask, 0, 0);
-            ctx.globalAlpha = 1;
+            if (coloredMaskCanvas) {
+              ctx.globalAlpha = localSettings.maskOpacity;
+              ctx.drawImage(coloredMaskCanvas, 0, 0, canvas.width, canvas.height);
+              ctx.globalAlpha = 1;
+            }
             break;
+          }
         }
       }
 
@@ -304,29 +384,34 @@ export const BodySegmentation: React.FC<BodySegmentationProps> = ({
       console.error('Segmentation error:', err);
     }
 
-    // Schedule next frame
-    requestRef.current = requestAnimationFrame(processSegmentation);
-  };
+    // Schedule next frame (unless the loop was stopped in the meantime)
+    if (loopTokenRef.current === token) {
+      requestRef.current = requestAnimationFrame(() => { void processSegmentation(token); });
+    }
+  }, [model, enabled, isLoading, localSettings, videoRef, onSegmentationComplete, getScratchCanvas, maskToCanvas]);
 
   // Start/stop processing when enabled changes
   useEffect(() => {
     if (enabled && !isLoading && model) {
-      processSegmentation();
-    } else {
-      if (requestRef.current) {
-        cancelAnimationFrame(requestRef.current);
-      }
+      const token = {};
+      loopTokenRef.current = token;
+      void processSegmentation(token);
     }
 
     return () => {
+      loopTokenRef.current = null;
       if (requestRef.current) {
         cancelAnimationFrame(requestRef.current);
+        requestRef.current = undefined;
       }
     };
-  }, [enabled, model, isLoading, localSettings]);
+  }, [enabled, model, isLoading, processSegmentation]);
 
   // Update settings
-  const updateSetting = (key: string, value: any) => {
+  const updateSetting = <K extends keyof BodySegmentationSettings>(
+    key: K,
+    value: BodySegmentationSettings[K]
+  ) => {
     setLocalSettings(prev => ({
       ...prev,
       [key]: value
@@ -362,7 +447,7 @@ export const BodySegmentation: React.FC<BodySegmentationProps> = ({
               <label className="block text-xs mb-1">Mode</label>
               <select
                 value={localSettings.mode}
-                onChange={(e) => updateSetting('mode', e.target.value)}
+                onChange={(e) => updateSetting('mode', e.target.value as BodySegmentationSettings['mode'])}
                 className="w-full text-sm rounded border-gray-300"
               >
                 <option value="blur">Background Blur</option>

@@ -1,7 +1,7 @@
-import React, { useRef, useEffect } from 'react';
+import { useRef, useEffect } from 'react';
 import { motion, useInView } from 'framer-motion';
 import { Link } from 'react-router-dom';
-import { Scissors, Type, Clock, Layout, Film, Volume2, ChevronRight, Wand2, Layers } from 'lucide-react';
+import { Type, Clock, Layout, Film, Volume2, ChevronRight, Wand2, Layers } from 'lucide-react';
 import lottie from 'lottie-web';
 
 import Navbar from '../../components/landing/Navbar';

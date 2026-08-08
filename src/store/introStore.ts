@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { nanoid } from 'nanoid';
 
-interface IntroTemplate {
+export interface IntroTemplate {
   id: string;
   name: string;
   thumbnail: string;
@@ -252,21 +252,26 @@ export const useIntroStore = create<IntroStore>((set, get) => ({
   },
 
   importTemplate: async (file) => {
-    try {
-      const content = await file.text();
-      const template = JSON.parse(content);
-      
-      // Validate template structure
-      if (!template.name || !template.settings) {
-        throw new Error('Invalid template format');
-      }
+    let template: unknown;
 
-      get().addTemplate({
-        ...template,
-        id: nanoid()
-      });
-    } catch (error) {
-      throw new Error('Failed to import template');
+    try {
+      template = JSON.parse(await file.text());
+    } catch {
+      throw new Error('Failed to import template: file is not valid JSON');
     }
+
+    // Validate template structure before it reaches the store
+    if (
+      !template ||
+      typeof template !== 'object' ||
+      !('name' in template) ||
+      !('settings' in template)
+    ) {
+      throw new Error('Invalid template format');
+    }
+
+    const { id: _ignoredId, ...rest } = template as Record<string, unknown>;
+    void _ignoredId;
+    get().addTemplate(rest as never);
   }
 }));

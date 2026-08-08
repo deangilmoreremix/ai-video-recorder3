@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import * as tf from '@tensorflow/tfjs';
-import { Loader, Play, Pause, Settings, RefreshCw } from 'lucide-react';
+import { Loader, RefreshCw } from 'lucide-react';
 
 interface VideoFrameInterpolationProps {
   videoRef: React.RefObject<HTMLVideoElement>;
@@ -32,9 +32,7 @@ export const VideoFrameInterpolation: React.FC<VideoFrameInterpolationProps> = (
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [model, setModel] = useState<tf.LayersModel | null>(null);
   const [isModelLoaded, setIsModelLoaded] = useState(false);
-  const frameBufferRef = useRef<ImageData[]>([]);
   const processedFramesRef = useRef<ImageData[]>([]);
   const processingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -75,6 +73,7 @@ export const VideoFrameInterpolation: React.FC<VideoFrameInterpolationProps> = (
     return () => {
       // Cleanup
       if (processingTimeoutRef.current) {
+        // eslint-disable-next-line react-hooks/exhaustive-deps
         clearTimeout(processingTimeoutRef.current);
       }
     };
@@ -178,7 +177,7 @@ export const VideoFrameInterpolation: React.FC<VideoFrameInterpolationProps> = (
       
     } catch (err) {
       console.error("Error processing frames:", err);
-      setError(`Failed to process video frames: ${err.message}`);
+      setError(`Failed to process video frames: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsProcessing(false);
     }
@@ -198,33 +197,6 @@ export const VideoFrameInterpolation: React.FC<VideoFrameInterpolationProps> = (
     return blended;
   };
 
-  // Method to export processed video (simulated)
-  const exportProcessedVideo = async () => {
-    if (!outputCanvasRef.current || processedFramesRef.current.length === 0) {
-      setError("No processed frames to export");
-      return null;
-    }
-    
-    try {
-      // In a real implementation, you would create a video file from the frames
-      // Here we'll just create a sequence of images for simplicity
-      alert("Export functionality would generate a video from the processed frames");
-      
-      // For a real implementation, you would:
-      // 1. Create a MediaRecorder to record from the canvas
-      // 2. Animate through all frames
-      // 3. Stop recording and return the video blob
-      
-      // For now, we'll just return a sample blob
-      return new Blob([], { type: 'video/webm' });
-      
-    } catch (err) {
-      console.error("Error exporting video:", err);
-      setError(`Failed to export video: ${err.message}`);
-      return null;
-    }
-  };
-  
   if (!enabled) return null;
   
   return (

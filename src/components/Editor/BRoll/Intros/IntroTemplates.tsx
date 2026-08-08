@@ -1,9 +1,5 @@
 import React, { useState } from 'react';
-import { 
-  Play, Star, Download, Edit2, Clock, Filter, Search, Grid, List, 
-  SortAsc, Tag, Plus, Palette, Music, Video, Image, Wand2, Layout,
-  Sparkles, Layers, Box, Maximize2, Minimize2, Zap
-} from 'lucide-react';
+import { Play, Star, Edit2, Clock, Filter, Search, Grid, List, Plus, Palette, Wand2, Layout, Box, Minimize2, Zap, type LucideIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useIntroStore } from '../../../../store/introStore';
 import { Tooltip } from '../../../ui/Tooltip';
@@ -11,11 +7,19 @@ import { Tooltip } from '../../../ui/Tooltip';
 interface Category {
   id: string;
   name: string;
-  icon: any;
+  icon: LucideIcon;
   description: string;
 }
 
-export const IntroTemplates: React.FC = () => {
+interface IntroTemplatesProps {
+  onSelect?: (templateId: string) => void;
+  selectedId?: string | null;
+}
+
+export const IntroTemplates: React.FC<IntroTemplatesProps> = ({
+  onSelect,
+  selectedId
+}) => {
   const {
     templates,
     selectedTemplate,
@@ -170,8 +174,9 @@ export const IntroTemplates: React.FC = () => {
             <motion.div
               key={template.id}
               layoutId={template.id}
-              className={`relative group cursor-pointer rounded-lg overflow-hidden
-                ${selectedTemplate === template.id ? 'ring-2 ring-[#E44E51]' : ''}
+              className={`relative group cursor-pointer rounded-lg overflow-hidden border
+                ${selectedId ?? selectedTemplate === template.id ? 'ring-2 ring-[#E44E51] border-transparent' : ''}
+                ${previewTemplate === template.id ? 'border-blue-400' : 'border-transparent'}
                 ${viewMode === 'list' ? 'flex items-center space-x-4' : ''}`}
             >
               <div className={`relative ${viewMode === 'list' ? 'w-48' : 'aspect-video'}`}>
@@ -194,7 +199,10 @@ export const IntroTemplates: React.FC = () => {
                     </Tooltip>
                     <Tooltip content="Edit template">
                       <button 
-                        onClick={() => setSelectedTemplate(template.id)}
+                        onClick={() => {
+                          setSelectedTemplate(template.id);
+                          onSelect?.(template.id);
+                        }}
                         className="p-2 bg-[#E44E51] text-white rounded-full hover:bg-[#D43B3E]"
                       >
                         <Edit2 className="w-4 h-4" />

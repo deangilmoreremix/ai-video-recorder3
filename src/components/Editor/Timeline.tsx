@@ -1,6 +1,6 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef } from 'react';
 import { useEditorStore } from '../../store/editorStore';
-import { Clock, Scissors, Plus, ChevronRight, ChevronLeft } from 'lucide-react';
+import { Scissors, Plus, ChevronRight, ChevronLeft } from 'lucide-react';
 
 export const Timeline: React.FC = () => {
   const {
@@ -8,8 +8,6 @@ export const Timeline: React.FC = () => {
     currentTime,
     duration,
     chapters,
-    captions,
-    silentSegments,
     setCurrentTime
   } = useEditorStore();
   

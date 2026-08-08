@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { HelpCircle, X, MessageCircle } from 'lucide-react';
+import { X, MessageCircle } from 'lucide-react';
 
 interface FeatureHelp {
   title: string;

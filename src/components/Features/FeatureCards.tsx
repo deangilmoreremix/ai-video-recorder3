@@ -1,14 +1,10 @@
 import React from 'react';
-import { 
-  Volume2, Type, BookOpen, Film, Layout, 
-  Scissors, Clock, Video, Wand2, Download,
-  Play, Sparkles, Film
-} from 'lucide-react';
+import { Volume2, Type, BookOpen, Film, Layout, Wand2, Play, Sparkles } from 'lucide-react';
 
 interface FeatureCard {
   id: string;
   title: string;
-  icon: any;
+  icon: React.ElementType;
   description: string;
   isImplemented: boolean;
   onClick: () => void;
@@ -97,7 +93,10 @@ export const FeatureCards: React.FC = () => {
         return (
           <button
             key={feature.id}
+            type="button"
             onClick={feature.onClick}
+            disabled={!feature.isImplemented}
+            aria-disabled={!feature.isImplemented}
             className={`p-4 rounded-lg border text-left transition-all
               ${feature.isImplemented 
                 ? 'bg-white border-gray-200 hover:shadow-md hover:border-[#E44E51]' 

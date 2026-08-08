@@ -1,15 +1,24 @@
 import React, { useState, useRef, useEffect } from 'react';
-import {
-  Download, Loader, Cpu, Sparkles, Volume2, Type, Image,
-  Zap, X, Film, Camera, Wand2, Settings, Youtube, Instagram,
-  Twitter, Facebook, Music4, Linkedin, Globe, Sliders, 
-  MessageCircle, Share2, Clock, Palette, Layout, Music,
-  Gauge, Layers, Eye, Save, Upload, Brain, Scan, Focus,
-  CloudFog, Wind, Filter, Maximize2, Minimize2, ImagePlus,
-  Move, Trash2
-} from 'lucide-react';
+import { AlertCircle, ChevronRight, Download, Loader, Sparkles, X, Settings, Youtube, Instagram, Twitter, Facebook, Linkedin, Palette, Wind, ImagePlus, Move } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Tooltip } from '../ui/Tooltip';
+import {
+  buildFileName,
+  downloadBlob,
+  getExtensionForBlob,
+  isCancellation,
+  processVideo,
+  toError,
+  type WatermarkPosition
+} from './VideoProcessing';
+
+const WATERMARK_POSITIONS: WatermarkPosition[] = [
+  'top-left',
+  'top-right',
+  'bottom-left',
+  'bottom-right',
+  'center'
+];
 
 interface EnhancedExportProps {
   videoBlob: Blob;
@@ -24,6 +33,7 @@ export const EnhancedExport: React.FC<EnhancedExportProps> = ({
 }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [error, setError] = useState<string | null>(null);
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
   const [settings, setSettings] = useState({
@@ -54,7 +64,7 @@ export const EnhancedExport: React.FC<EnhancedExportProps> = ({
     },
     watermark: {
       enabled: false,
-      position: 'bottom-right',
+      position: 'bottom-right' as WatermarkPosition,
       opacity: 0.8,
       scale: 1,
       file: null as File | null,
@@ -106,6 +116,10 @@ export const EnhancedExport: React.FC<EnhancedExportProps> = ({
   ];
 
   const watermarkInputRef = useRef<HTMLInputElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  // Keeps the newest preview URL reachable from the unmount cleanup.
+  const previewRef = useRef<string>('');
+  previewRef.current = settings.watermark.preview;
 
   const handleWatermarkUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -115,54 +129,90 @@ export const EnhancedExport: React.FC<EnhancedExportProps> = ({
         return;
       }
 
-      const preview = URL.createObjectURL(file);
-      setSettings(prev => ({
-        ...prev,
-        watermark: {
-          ...prev.watermark,
-          file,
-          preview,
-          enabled: true
-        }
-      }));
+      setSettings(prev => {
+        if (prev.watermark.preview) URL.revokeObjectURL(prev.watermark.preview);
+        return {
+          ...prev,
+          watermark: {
+            ...prev.watermark,
+            file,
+            preview: URL.createObjectURL(file),
+            enabled: true
+          }
+        };
+      });
+      setError(null);
     }
+
+    // Allow picking the same file again later.
+    e.target.value = '';
+  };
+
+  const handleCancel = () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setIsProcessing(false);
+    setProgress(0);
   };
 
   const handleExport = async () => {
+    if (isProcessing) return;
+
+    const controller = new AbortController();
+    abortRef.current = controller;
     setIsProcessing(true);
     setProgress(0);
+    setError(null);
 
     try {
-      // Simulated export process with progress updates
-      for (let i = 0; i <= 100; i += 10) {
-        await new Promise(resolve => setTimeout(resolve, 500));
-        setProgress(i);
-      }
+      const result = await processVideo(
+        videoBlob,
+        {
+          format: settings.format,
+          codec: settings.codec,
+          resolution: settings.resolution,
+          fps: settings.fps,
+          bitrate: settings.bitrate,
+          quality: settings.quality.video,
+          audioCodec: settings.audioSettings.codec,
+          audioChannels: settings.audioSettings.channels,
+          denoise: settings.ai.denoise,
+          stabilize: settings.ai.stabilize,
+          enhanceColors: settings.ai.enhance || settings.ai.colorCorrect,
+          watermark: settings.watermark.enabled && settings.watermark.file
+            ? {
+                file: settings.watermark.file,
+                position: settings.watermark.position,
+                opacity: settings.watermark.opacity,
+                scale: settings.watermark.scale,
+                offset: settings.watermark.offset
+              }
+            : undefined
+        },
+        setProgress,
+        controller.signal
+      );
 
-      // Create download link
-      const url = URL.createObjectURL(videoBlob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `exported_video.${settings.format}`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-
+      downloadBlob(result, buildFileName('exported_video', settings.format));
       onClose();
-    } catch (error) {
-      console.error('Export failed:', error);
+    } catch (err) {
+      if (!isCancellation(err)) setError(toError(err).message);
     } finally {
+      abortRef.current = null;
       setIsProcessing(false);
       setProgress(0);
     }
   };
 
+  const handleDownloadOriginal = () => {
+    downloadBlob(videoBlob, buildFileName('exported_video', getExtensionForBlob(videoBlob)));
+  };
+
+  // Abort a running export and release the watermark preview on unmount.
   useEffect(() => {
     return () => {
-      if (settings.watermark.preview) {
-        URL.revokeObjectURL(settings.watermark.preview);
-      }
+      abortRef.current?.abort();
+      if (previewRef.current) URL.revokeObjectURL(previewRef.current);
     };
   }, []);
 
@@ -174,7 +224,7 @@ export const EnhancedExport: React.FC<EnhancedExportProps> = ({
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
+      onClick={(e) => e.target === e.currentTarget && !isProcessing && onClose()}
     >
       <motion.div
         initial={{ scale: 0.95, opacity: 0 }}
@@ -186,7 +236,8 @@ export const EnhancedExport: React.FC<EnhancedExportProps> = ({
           <h3 className="text-lg font-semibold">Export Video</h3>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-gray-100 rounded-lg"
+            disabled={isProcessing}
+            className="p-2 hover:bg-gray-100 rounded-lg disabled:opacity-50"
           >
             <X className="w-5 h-5" />
           </button>
@@ -554,7 +605,7 @@ export const EnhancedExport: React.FC<EnhancedExportProps> = ({
                           Position
                         </label>
                         <div className="grid grid-cols-3 gap-2">
-                          {['top-left', 'top-right', 'bottom-left', 'bottom-right', 'center'].map((pos) => (
+                          {WATERMARK_POSITIONS.map((pos) => (
                             <button
                               key={pos}
                               onClick={() => setSettings(prev => ({
@@ -629,7 +680,28 @@ export const EnhancedExport: React.FC<EnhancedExportProps> = ({
         </div>
 
         {/* Export Button */}
-        <div className="p-4 border-t">
+        <div className="p-4 border-t space-y-3">
+          {isProcessing && (
+            <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-[#E44E51] transition-[width] duration-200"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+          )}
+
+          {error && (
+            <div className="p-3 bg-red-50 text-red-700 rounded-lg text-sm flex items-start space-x-2">
+              <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+              <div className="space-y-2">
+                <p>{error}</p>
+                <button onClick={handleDownloadOriginal} className="underline hover:no-underline">
+                  Download the original file instead
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="flex justify-between items-center">
             <div className="text-sm text-gray-500">
               Estimated file size: {Math.round(
@@ -640,7 +712,7 @@ export const EnhancedExport: React.FC<EnhancedExportProps> = ({
             </div>
             <div className="flex space-x-4">
               <button
-                onClick={onClose}
+                onClick={isProcessing ? handleCancel : onClose}
                 className="px-4 py-2 text-gray-600 hover:text-gray-800"
               >
                 Cancel

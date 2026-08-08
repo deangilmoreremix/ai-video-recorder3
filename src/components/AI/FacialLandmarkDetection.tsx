@@ -1,60 +1,78 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as tf from '@tensorflow/tfjs';
 import * as faceLandmarksDetection from '@tensorflow-models/face-landmarks-detection';
-import { MediaPipeFaceMesh } from '@tensorflow-models/face-landmarks-detection';
+import { Face, FaceLandmarksDetector } from '@tensorflow-models/face-landmarks-detection';
 import { Loader, Settings } from 'lucide-react';
+
+// Contour indices (lips / eyes / irises / face oval) of the MediaPipe face mesh
+const FACE_MESH_CONTOURS = faceLandmarksDetection.util.getKeypointIndexByContour(
+  faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh
+);
+
+interface FacialLandmarkSettings {
+  minConfidence: number;
+  maxFaces: number;
+  drawMesh: boolean;
+  drawContours: boolean;
+  drawIris: boolean;
+  meshColor: string;
+  contourColor: string;
+  irisColor: string;
+}
+
+const DEFAULT_SETTINGS: FacialLandmarkSettings = {
+  minConfidence: 0.5,
+  maxFaces: 5,
+  drawMesh: true,
+  drawContours: true,
+  drawIris: true,
+  meshColor: '#E44E51',
+  contourColor: '#00FFFF',
+  irisColor: '#FFFFFF'
+};
 
 interface FacialLandmarkDetectionProps {
   videoRef: React.RefObject<HTMLVideoElement>;
   enabled: boolean;
-  onFacesDetected?: (faces: any[]) => void;
-  settings?: {
-    minConfidence?: number;
-    maxFaces?: number;
-    drawMesh?: boolean;
-    drawContours?: boolean;
-    drawIris?: boolean;
-    meshColor?: string;
-    contourColor?: string;
-    irisColor?: string;
-  };
+  onFacesDetected?: (faces: Face[]) => void;
+  settings?: Partial<FacialLandmarkSettings>;
 }
 
 export const FacialLandmarkDetection: React.FC<FacialLandmarkDetectionProps> = ({
   videoRef,
   enabled,
   onFacesDetected,
-  settings = {
-    minConfidence: 0.5,
-    maxFaces: 5,
-    drawMesh: true,
-    drawContours: true,
-    drawIris: true,
-    meshColor: '#E44E51',
-    contourColor: '#00FFFF',
-    irisColor: '#FFFFFF'
-  }
+  settings
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [model, setModel] = useState<MediaPipeFaceMesh | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [model, setModel] = useState<FaceLandmarksDetector | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
 
-  const CONTOURS = {
-    jawOutline: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
-    leftEyebrowTop: [70, 63, 105, 66, 107],
-    leftEyebrowBottom: [46, 53, 52, 65],
-    rightEyebrowTop: [336, 296, 334, 293, 300],
-    rightEyebrowBottom: [285, 295, 282, 283],
-    leftEye: [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246],
-    rightEye: [362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 386, 385, 384, 398],
-    lips: [61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291, 375, 321, 405, 314, 17, 84, 181, 91, 146]
+  // Keep the latest callback in a ref so the detection loop is not restarted
+  // on every parent render.
+  const onFacesDetectedRef = useRef(onFacesDetected);
+  useEffect(() => {
+    onFacesDetectedRef.current = onFacesDetected;
+  }, [onFacesDetected]);
+
+  // Panel edits are kept locally instead of mutating the (read-only) props.
+  const [settingsOverrides, setSettingsOverrides] = useState<Partial<FacialLandmarkSettings>>({});
+  const {
+    maxFaces, drawMesh, drawContours, drawIris, meshColor, contourColor, irisColor
+  }: FacialLandmarkSettings = { ...DEFAULT_SETTINGS, ...settings, ...settingsOverrides };
+
+  const updateSetting = <K extends keyof FacialLandmarkSettings>(
+    key: K,
+    value: FacialLandmarkSettings[K]
+  ) => {
+    setSettingsOverrides(prev => ({ ...prev, [key]: value }));
   };
 
   useEffect(() => {
     let isMounted = true;
+    let localModel: FaceLandmarksDetector | null = null;
 
     const initializeModel = async () => {
       if (!enabled) return;
@@ -67,17 +85,22 @@ export const FacialLandmarkDetection: React.FC<FacialLandmarkDetectionProps> = (
         await tf.ready();
         
         // Load the face landmark detection model
-        const loadedModel = await faceLandmarksDetection.load(
+        const loadedModel = await faceLandmarksDetection.createDetector(
           faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
           {
+            runtime: 'tfjs',
             refineLandmarks: true,
-            maxFaces: settings.maxFaces
+            maxFaces
           }
         );
+
+        localModel = loadedModel;
 
         if (isMounted) {
           setModel(loadedModel);
           setIsLoading(false);
+        } else {
+          loadedModel.dispose();
         }
       } catch (err) {
         console.error('Failed to load face landmarks detection model:', err);
@@ -92,21 +115,119 @@ export const FacialLandmarkDetection: React.FC<FacialLandmarkDetectionProps> = (
 
     return () => {
       isMounted = false;
-      // Cleanup TensorFlow memory
-      if (model) {
-        // No explicit model.dispose() method for face-landmarks-detection,
-        // but we can try to clean up general TensorFlow memory
-        tf.disposeVariables();
+      // Only dispose this detector - `tf.disposeVariables()` is global and
+      // would break every other model still loaded in the app.
+      try {
+        localModel?.dispose();
+      } catch (disposeError) {
+        console.warn('Failed to dispose facial landmark model:', disposeError);
       }
+      setModel(null);
     };
-  }, [enabled, settings.maxFaces]);
+  }, [enabled, maxFaces]);
+
+  const drawFaceMesh = useCallback((predictions: Face[]) => {
+    if (!canvasRef.current || !videoRef.current) return;
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // Match canvas size to video
+    if (canvas.width !== videoRef.current.videoWidth ||
+        canvas.height !== videoRef.current.videoHeight) {
+      canvas.width = videoRef.current.videoWidth;
+      canvas.height = videoRef.current.videoHeight;
+    }
+
+    // Clear previous drawings
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    predictions.forEach((prediction) => {
+      const keypoints = prediction.keypoints;
+      const box = prediction.box;
+
+      // Draw bounding box
+      if (box) {
+        ctx.strokeStyle = meshColor || '#E44E51';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(box.xMin, box.yMin, box.width, box.height);
+      }
+
+      // Draw facial mesh points if enabled
+      if (drawMesh) {
+        ctx.fillStyle = meshColor || '#E44E51';
+        for (let i = 0; i < keypoints.length; i++) {
+          const point = keypoints[i];
+          ctx.beginPath();
+          ctx.arc(point.x, point.y, 1, 0, 2 * Math.PI);
+          ctx.fill();
+        }
+      }
+
+      // Draw contours if enabled
+      if (drawContours) {
+        ctx.strokeStyle = contourColor || '#00FFFF';
+        ctx.lineWidth = 2;
+
+        ['faceOval', 'leftEye', 'rightEye', 'leftEyebrow', 'rightEyebrow', 'lips'].forEach(label => {
+          const indices = FACE_MESH_CONTOURS[label];
+          if (!indices || indices.length === 0) return;
+
+          ctx.beginPath();
+          indices.forEach((index, i) => {
+            const point = keypoints[index];
+            if (!point) return;
+            if (i === 0) {
+              ctx.moveTo(point.x, point.y);
+            } else {
+              ctx.lineTo(point.x, point.y);
+            }
+          });
+          // Close the loop for the face oval, lips and eyes
+          if (label !== 'leftEyebrow' && label !== 'rightEyebrow') {
+            ctx.closePath();
+          }
+          ctx.stroke();
+        });
+      }
+
+      // Draw irises if enabled and available (only present with refineLandmarks)
+      if (drawIris) {
+        ctx.fillStyle = irisColor || '#FFFFFF';
+        ctx.strokeStyle = irisColor || '#FFFFFF';
+
+        ['leftIris', 'rightIris'].forEach(label => {
+          const indices = FACE_MESH_CONTOURS[label];
+          const center = indices && indices.length > 0 ? keypoints[indices[0]] : undefined;
+          if (!center) return;
+
+          ctx.beginPath();
+          ctx.arc(center.x, center.y, 5, 0, 2 * Math.PI);
+          ctx.fill();
+          ctx.stroke();
+        });
+      }
+    });
+  }, [videoRef, drawMesh, drawContours, drawIris, meshColor, contourColor, irisColor]);
 
   useEffect(() => {
-    let animationFrame: number;
+    let animationFrame: number | undefined;
     let isDetecting = false;
+    let cancelled = false;
 
     const detectFaces = async () => {
-      if (!model || !videoRef.current || !canvasRef.current || !enabled || isDetecting || isLoading) {
+      if (cancelled) return;
+
+      const video = videoRef.current;
+
+      if (!model || !video || !canvasRef.current || !enabled || isDetecting || isLoading) {
+        return;
+      }
+
+      // Wait until the video actually has a frame to analyse
+      if (video.readyState < 2 || !video.videoWidth || !video.videoHeight) {
+        animationFrame = requestAnimationFrame(detectFaces);
         return;
       }
 
@@ -114,16 +235,12 @@ export const FacialLandmarkDetection: React.FC<FacialLandmarkDetectionProps> = (
 
       try {
         // Process the current video frame
-        const predictions = await model.estimateFaces({
-          input: videoRef.current,
-          returnTensors: false,
+        const predictions = await model.estimateFaces(video, {
           flipHorizontal: false,
-          predictIrises: settings.drawIris
+          staticImageMode: false
         });
         
-        if (onFacesDetected) {
-          onFacesDetected(predictions);
-        }
+        onFacesDetectedRef.current?.(predictions);
 
         drawFaceMesh(predictions);
       } catch (err) {
@@ -132,7 +249,9 @@ export const FacialLandmarkDetection: React.FC<FacialLandmarkDetectionProps> = (
         isDetecting = false;
       }
 
-      animationFrame = requestAnimationFrame(detectFaces);
+      if (!cancelled) {
+        animationFrame = requestAnimationFrame(detectFaces);
+      }
     };
 
     if (enabled && model && !isLoading) {
@@ -140,97 +259,12 @@ export const FacialLandmarkDetection: React.FC<FacialLandmarkDetectionProps> = (
     }
 
     return () => {
+      cancelled = true;
       if (animationFrame) {
         cancelAnimationFrame(animationFrame);
       }
     };
-  }, [model, enabled, isLoading, onFacesDetected, settings]);
-
-  const drawFaceMesh = (predictions: any[]) => {
-    if (!canvasRef.current || !videoRef.current) return;
-
-    const ctx = canvasRef.current.getContext('2d');
-    if (!ctx) return;
-
-    // Match canvas size to video
-    canvasRef.current.width = videoRef.current.videoWidth;
-    canvasRef.current.height = videoRef.current.videoHeight;
-
-    // Clear previous drawings
-    ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-
-    predictions.forEach((prediction) => {
-      const keypoints = prediction.scaledMesh;
-      const boundingBox = prediction.boundingBox;
-      
-      // Draw bounding box
-      const { topLeft, bottomRight } = boundingBox;
-      const boxWidth = bottomRight[0] - topLeft[0];
-      const boxHeight = bottomRight[1] - topLeft[1];
-      
-      ctx.strokeStyle = settings.meshColor || '#E44E51';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(
-        topLeft[0], topLeft[1], boxWidth, boxHeight
-      );
-
-      // Draw confidence score
-      ctx.fillStyle = settings.meshColor || '#E44E51';
-      ctx.font = '12px Arial';
-      ctx.fillText(
-        `Confidence: ${Math.round(prediction.faceInViewConfidence * 100)}%`,
-        topLeft[0], topLeft[1] - 5
-      );
-
-      // Draw facial mesh points if enabled
-      if (settings.drawMesh) {
-        ctx.fillStyle = settings.meshColor || '#E44E51';
-        for (let i = 0; i < keypoints.length; i++) {
-          const [x, y] = keypoints[i];
-          ctx.beginPath();
-          ctx.arc(x, y, 1, 0, 2 * Math.PI);
-          ctx.fill();
-        }
-      }
-
-      // Draw contours if enabled
-      if (settings.drawContours) {
-        ctx.strokeStyle = settings.contourColor || '#00FFFF';
-        ctx.lineWidth = 2;
-        
-        Object.values(CONTOURS).forEach(contour => {
-          ctx.beginPath();
-          for (let i = 0; i < contour.length; i++) {
-            const point = keypoints[contour[i]];
-            if (i === 0) {
-              ctx.moveTo(point[0], point[1]);
-            } else {
-              ctx.lineTo(point[0], point[1]);
-            }
-          }
-          // Close the loop for the lips and eyes
-          if (contour === CONTOURS.leftEye || contour === CONTOURS.rightEye || contour === CONTOURS.lips) {
-            ctx.closePath();
-          }
-          ctx.stroke();
-        });
-      }
-
-      // Draw irises if enabled and available
-      if (settings.drawIris && prediction.annotations && prediction.annotations.leftEyeIris && prediction.annotations.rightEyeIris) {
-        ctx.fillStyle = settings.irisColor || '#FFFFFF';
-        ctx.strokeStyle = settings.irisColor || '#FFFFFF';
-        
-        [prediction.annotations.leftEyeIris, prediction.annotations.rightEyeIris].forEach(iris => {
-          const [centerX, centerY] = iris[0];
-          ctx.beginPath();
-          ctx.arc(centerX, centerY, 5, 0, 2 * Math.PI);
-          ctx.fill();
-          ctx.stroke();
-        });
-      }
-    });
-  };
+  }, [model, enabled, isLoading, videoRef, drawFaceMesh]);
 
   if (!enabled) return null;
 
@@ -260,8 +294,8 @@ export const FacialLandmarkDetection: React.FC<FacialLandmarkDetectionProps> = (
               <label className="block text-xs mb-1">Max Faces</label>
               <select
                 className="w-full text-sm rounded border-gray-300"
-                value={settings.maxFaces}
-                onChange={(e) => settings.maxFaces = Number(e.target.value)}
+                value={maxFaces}
+                onChange={(e) => updateSetting('maxFaces', Number(e.target.value))}
               >
                 <option value="1">1</option>
                 <option value="2">2</option>
@@ -274,8 +308,8 @@ export const FacialLandmarkDetection: React.FC<FacialLandmarkDetectionProps> = (
               <label className="text-xs">Show Mesh</label>
               <input
                 type="checkbox"
-                checked={settings.drawMesh}
-                onChange={(e) => settings.drawMesh = e.target.checked}
+                checked={drawMesh}
+                onChange={(e) => updateSetting('drawMesh', e.target.checked)}
                 className="rounded text-[#E44E51]"
               />
             </div>
@@ -284,8 +318,8 @@ export const FacialLandmarkDetection: React.FC<FacialLandmarkDetectionProps> = (
               <label className="text-xs">Show Contours</label>
               <input
                 type="checkbox"
-                checked={settings.drawContours}
-                onChange={(e) => settings.drawContours = e.target.checked}
+                checked={drawContours}
+                onChange={(e) => updateSetting('drawContours', e.target.checked)}
                 className="rounded text-[#E44E51]"
               />
             </div>
@@ -294,8 +328,8 @@ export const FacialLandmarkDetection: React.FC<FacialLandmarkDetectionProps> = (
               <label className="text-xs">Show Irises</label>
               <input
                 type="checkbox"
-                checked={settings.drawIris}
-                onChange={(e) => settings.drawIris = e.target.checked}
+                checked={drawIris}
+                onChange={(e) => updateSetting('drawIris', e.target.checked)}
                 className="rounded text-[#E44E51]"
               />
             </div>

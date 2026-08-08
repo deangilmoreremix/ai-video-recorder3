@@ -1,18 +1,20 @@
 import React from 'react';
 import { Play, Pause, SkipBack, SkipForward } from 'lucide-react';
-import { useEditorStore } from '../../store';
+import { useEditorStore } from '../../store/editorStore';
 
 export const VideoPreview: React.FC = () => {
-  const { currentProject } = useEditorStore();
+  // The timeline clips live in the editor store
+  const clips = useEditorStore((state) => state.clips);
   const [isPlaying, setIsPlaying] = React.useState(false);
   const videoRef = React.useRef<HTMLVideoElement>(null);
+  const clipUrl = clips[0]?.url;
 
   const togglePlayback = () => {
     if (videoRef.current) {
       if (isPlaying) {
         videoRef.current.pause();
       } else {
-        videoRef.current.play();
+        videoRef.current.play().catch(() => setIsPlaying(false));
       }
       setIsPlaying(!isPlaying);
     }
@@ -21,11 +23,13 @@ export const VideoPreview: React.FC = () => {
   return (
     <div className="bg-gray-900 rounded-lg overflow-hidden">
       <div className="aspect-video bg-black relative">
-        {currentProject?.timeline.clips[0]?.url ? (
+        {clipUrl ? (
           <video
             ref={videoRef}
-            src={currentProject.timeline.clips[0].url}
+            src={clipUrl}
             className="w-full h-full object-contain"
+            onPause={() => setIsPlaying(false)}
+            onPlay={() => setIsPlaying(true)}
             onEnded={() => setIsPlaying(false)}
           />
         ) : (
@@ -59,7 +63,7 @@ export const VideoPreview: React.FC = () => {
           </button>
           <button
             onClick={() => {
-              if (videoRef.current) {
+              if (videoRef.current && Number.isFinite(videoRef.current.duration)) {
                 videoRef.current.currentTime = Math.min(
                   videoRef.current.duration,
                   videoRef.current.currentTime + 5

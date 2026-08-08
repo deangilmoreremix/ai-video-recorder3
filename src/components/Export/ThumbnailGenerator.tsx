@@ -1,14 +1,57 @@
 import React, { useState, useRef, useEffect } from 'react';
-import {
-  Grid, Camera, Palette, Crop, Download, Play,
-  Wand2, Sliders, Layers, Copy, Trash2, Type,
-  RefreshCw, Check, ArrowRight, Image, Sparkles
-} from 'lucide-react';
+import { AlertCircle, Camera, Palette, Crop, Download, Copy, Type, RefreshCw, Check, ArrowRight } from 'lucide-react';
 
 interface ThumbnailGeneratorProps {
   videoBlob: Blob | null;
   onGenerate?: (thumbnails: Blob[]) => void;
 }
+
+type ThumbnailFormat = 'jpg' | 'png' | 'webp';
+type ThumbnailAspectRatio = '16:9' | '9:16' | '1:1' | '4:3';
+
+const FORMATS: ThumbnailFormat[] = ['jpg', 'png', 'webp'];
+
+const ASPECT_RATIOS: Array<{ id: ThumbnailAspectRatio; label: string }> = [
+  { id: '16:9', label: 'Landscape 16:9' },
+  { id: '9:16', label: 'Portrait 9:16' },
+  { id: '1:1', label: 'Square 1:1' },
+  { id: '4:3', label: 'Standard 4:3' }
+];
+
+interface Thumbnail {
+  url: string;
+  blob: Blob;
+}
+
+const SEEK_TIMEOUT_MS = 10000;
+
+/** Resolves once the element reached `time`, or rejects on error/timeout. */
+const seekTo = (video: HTMLVideoElement, time: number): Promise<void> =>
+  new Promise((resolve, reject) => {
+    const finish = (error?: Error) => {
+      window.clearTimeout(timer);
+      video.removeEventListener('seeked', handleSeeked);
+      video.removeEventListener('error', handleError);
+      if (error) reject(error);
+      else resolve();
+    };
+    const handleSeeked = () => finish();
+    const handleError = () => finish(new Error('The video could not be decoded at this position.'));
+    const timer = window.setTimeout(() => finish(new Error('Timed out while seeking the video.')), SEEK_TIMEOUT_MS);
+
+    video.addEventListener('seeked', handleSeeked, { once: true });
+    video.addEventListener('error', handleError, { once: true });
+    video.currentTime = time;
+  });
+
+const canvasToBlob = (canvas: HTMLCanvasElement, mimeType: string, quality?: number): Promise<Blob> =>
+  new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => (blob ? resolve(blob) : reject(new Error('Could not encode the thumbnail.'))),
+      mimeType,
+      quality
+    );
+  });
 
 export const ThumbnailGenerator: React.FC<ThumbnailGeneratorProps> = ({
   videoBlob,
@@ -16,11 +59,11 @@ export const ThumbnailGenerator: React.FC<ThumbnailGeneratorProps> = ({
 }) => {
   const [settings, setSettings] = useState({
     count: 3,
-    format: 'jpg' as 'jpg' | 'png' | 'webp',
+    format: 'jpg' as ThumbnailFormat,
     quality: 90,
     cropEnabled: false,
     colorCorrection: true,
-    aspectRatio: '16:9' as '16:9' | '9:16' | '1:1' | '4:3',
+    aspectRatio: '16:9' as ThumbnailAspectRatio,
     textOverlay: false,
     textContent: '',
     autoDetect: true
@@ -28,143 +71,196 @@ export const ThumbnailGenerator: React.FC<ThumbnailGeneratorProps> = ({
   
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [thumbnails, setThumbnails] = useState<string[]>([]);
+  const [thumbnails, setThumbnails] = useState<Thumbnail[]>([]);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
-  
+  const [duration, setDuration] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  
+  const cancelledRef = useRef(false);
+  // Lets the unmount cleanup revoke the latest URLs.
+  const thumbnailsRef = useRef<Thumbnail[]>([]);
+  thumbnailsRef.current = thumbnails;
+
   useEffect(() => {
-    if (videoBlob && videoRef.current) {
-      const url = URL.createObjectURL(videoBlob);
-      videoRef.current.src = url;
-      
-      return () => {
-        URL.revokeObjectURL(url);
-      };
-    }
+    const video = videoRef.current;
+    if (!videoBlob || !video) return;
+
+    const url = URL.createObjectURL(videoBlob);
+    video.src = url;
+
+    // MediaRecorder files may only report their real duration after scanning.
+    const handleMetadata = () => setDuration(Number.isFinite(video.duration) ? video.duration : 0);
+    video.addEventListener('loadedmetadata', handleMetadata);
+    video.addEventListener('durationchange', handleMetadata);
+
+    return () => {
+      video.removeEventListener('loadedmetadata', handleMetadata);
+      video.removeEventListener('durationchange', handleMetadata);
+      video.removeAttribute('src');
+      video.load();
+      URL.revokeObjectURL(url);
+    };
   }, [videoBlob]);
-  
+
+  // Release every preview URL when the component goes away.
+  useEffect(() => {
+    return () => {
+      cancelledRef.current = true;
+      thumbnailsRef.current.forEach((thumbnail) => URL.revokeObjectURL(thumbnail.url));
+    };
+  }, []);
+
   const generateThumbnails = async () => {
-    if (!videoBlob || !videoRef.current || !canvasRef.current) return;
-    
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!videoBlob || !video || !canvas || isProcessing) return;
+
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) {
+      setError('Could not get canvas context.');
+      return;
+    }
+
+    if (!video.videoWidth || !video.videoHeight) {
+      setError('The video is still loading. Please try again in a moment.');
+      return;
+    }
+
+    cancelledRef.current = false;
     setIsProcessing(true);
     setProgress(0);
-    
+    setError(null);
+
+    const created: Thumbnail[] = [];
+
     try {
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      const ctx = canvas.getContext('2d');
-      
-      if (!ctx) throw new Error("Could not get canvas context");
-      
-      // Set canvas size to match video or aspect ratio
-      const aspectRatioMultiplier = 
-        settings.aspectRatio === '16:9' ? { w: 16, h: 9 } :
-        settings.aspectRatio === '9:16' ? { w: 9, h: 16 } :
-        settings.aspectRatio === '1:1' ? { w: 1, h: 1 } :
-        { w: 4, h: 3 };
-      
+      const sourceWidth = video.videoWidth;
+      const sourceHeight = video.videoHeight;
+
+      const ratio =
+        settings.aspectRatio === '16:9' ? 16 / 9 :
+        settings.aspectRatio === '9:16' ? 9 / 16 :
+        settings.aspectRatio === '1:1' ? 1 :
+        4 / 3;
+
+      // Center-crop the source instead of stretching it into the target frame.
+      let cropWidth = sourceWidth;
+      let cropHeight = sourceHeight;
       if (settings.cropEnabled) {
-        // Use custom aspect ratio
-        const height = Math.round((video.videoWidth / aspectRatioMultiplier.w) * aspectRatioMultiplier.h);
-        canvas.width = video.videoWidth;
-        canvas.height = height;
-      } else {
-        // Match video dimensions
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
+        if (sourceWidth / sourceHeight > ratio) {
+          cropWidth = Math.round(sourceHeight * ratio);
+        } else {
+          cropHeight = Math.round(sourceWidth / ratio);
+        }
       }
-      
-      const duration = video.duration;
-      const results: string[] = [];
-      const blobResults: Blob[] = [];
-      
-      // Generate thumbnails at evenly spaced intervals
+      const cropX = Math.round((sourceWidth - cropWidth) / 2);
+      const cropY = Math.round((sourceHeight - cropHeight) / 2);
+
+      canvas.width = cropWidth;
+      canvas.height = cropHeight;
+
+      const videoDuration = duration || (Number.isFinite(video.duration) ? video.duration : 0);
+      if (videoDuration <= 0) throw new Error('The video duration is not available yet.');
+
+      const mimeType =
+        settings.format === 'jpg' ? 'image/jpeg' :
+        settings.format === 'png' ? 'image/png' : 'image/webp';
+      const quality = settings.format === 'png' ? undefined : settings.quality / 100;
+
+      const wasPlaying = !video.paused;
+      video.pause();
+
       for (let i = 0; i < settings.count; i++) {
-        // Calculate position (add 0.5 to avoid exact 0)
-        const position = ((i + 0.5) / settings.count) * duration;
-        
-        // Set video position
-        video.currentTime = position;
-        
-        // Wait for the video to seek to the time
-        await new Promise<void>(resolve => {
-          const handleSeeked = () => {
-            video.removeEventListener('seeked', handleSeeked);
-            resolve();
-          };
-          video.addEventListener('seeked', handleSeeked);
-        });
-        
-        // Draw the frame to canvas
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        
-        // Apply color correction if enabled
+        if (cancelledRef.current) break;
+
+        // Stay inside the media range - seeking past the end never resolves.
+        const position = Math.min(((i + 0.5) / settings.count) * videoDuration, Math.max(0, videoDuration - 0.05));
+        await seekTo(video, position);
+
+        ctx.drawImage(video, cropX, cropY, cropWidth, cropHeight, 0, 0, canvas.width, canvas.height);
+
         if (settings.colorCorrection) {
-          // Simple brightness and contrast adjustment
           const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
           const data = imageData.data;
-          
-          // Apply simple enhancement
+
           for (let j = 0; j < data.length; j += 4) {
-            // Increase contrast slightly
-            data[j] = Math.min(255, data[j] * 1.1);     // Red
-            data[j + 1] = Math.min(255, data[j + 1] * 1.1); // Green
-            data[j + 2] = Math.min(255, data[j + 2] * 1.1); // Blue
+            data[j] = Math.min(255, data[j] * 1.1);
+            data[j + 1] = Math.min(255, data[j + 1] * 1.1);
+            data[j + 2] = Math.min(255, data[j + 2] * 1.1);
           }
-          
+
           ctx.putImageData(imageData, 0, 0);
         }
-        
-        // Add text overlay if enabled
+
         if (settings.textOverlay && settings.textContent) {
           const text = settings.textContent;
-          ctx.font = 'bold 32px Arial';
+          const fontSize = Math.max(16, Math.round(canvas.width / 20));
+          ctx.font = `bold ${fontSize}px Arial`;
           ctx.fillStyle = 'white';
           ctx.strokeStyle = 'black';
-          ctx.lineWidth = 2;
+          ctx.lineWidth = Math.max(2, fontSize / 16);
           ctx.textAlign = 'center';
-          ctx.strokeText(text, canvas.width / 2, canvas.height - 40);
-          ctx.fillText(text, canvas.width / 2, canvas.height - 40);
+          ctx.strokeText(text, canvas.width / 2, canvas.height - fontSize);
+          ctx.fillText(text, canvas.width / 2, canvas.height - fontSize);
         }
-        
-        // Convert canvas to blob
-        const mimeType = 
-          settings.format === 'jpg' ? 'image/jpeg' :
-          settings.format === 'png' ? 'image/png' : 'image/webp';
-        
-        const quality = settings.format === 'jpg' || settings.format === 'webp' 
-          ? settings.quality / 100 
-          : undefined;
-        
-        const blob = await new Promise<Blob>(resolve => {
-          canvas.toBlob(blob => resolve(blob!), mimeType, quality);
-        });
-        
-        blobResults.push(blob);
-        
-        // Create URL for preview
-        const url = URL.createObjectURL(blob);
-        results.push(url);
-        
-        // Update progress
+
+        const blob = await canvasToBlob(canvas, mimeType, quality);
+        created.push({ blob, url: URL.createObjectURL(blob) });
+
         setProgress(Math.round(((i + 1) / settings.count) * 100));
       }
-      
-      setThumbnails(results);
-      
-      // Call the onGenerate callback with the generated thumbnails
-      if (onGenerate) {
-        onGenerate(blobResults);
+
+      if (cancelledRef.current) {
+        created.forEach((thumbnail) => URL.revokeObjectURL(thumbnail.url));
+        return;
       }
-    } catch (error) {
-      console.error('Error generating thumbnails:', error);
+
+      // Replace the previous batch and release its URLs.
+      setThumbnails((prev) => {
+        prev.forEach((thumbnail) => URL.revokeObjectURL(thumbnail.url));
+        return created;
+      });
+      setSelectedIndex(null);
+
+      onGenerate?.(created.map((thumbnail) => thumbnail.blob));
+
+      if (wasPlaying) video.play().catch(() => undefined);
+    } catch (err) {
+      created.forEach((thumbnail) => URL.revokeObjectURL(thumbnail.url));
+      setError(err instanceof Error ? err.message : 'Could not generate thumbnails.');
     } finally {
       setIsProcessing(false);
     }
   };
-  
+
+  const copySelected = async () => {
+    if (selectedIndex === null) return;
+    const thumbnail = thumbnails[selectedIndex];
+    if (!thumbnail) return;
+
+    try {
+      if (!navigator.clipboard || typeof ClipboardItem === 'undefined') {
+        throw new Error('Clipboard access is not available in this browser.');
+      }
+      await navigator.clipboard.write([new ClipboardItem({ [thumbnail.blob.type]: thumbnail.blob })]);
+      setError(null);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? `${err.message} Use the download button instead.`
+          : 'Could not copy the thumbnail.'
+      );
+    }
+  };
+
+  const useSelected = () => {
+    if (selectedIndex === null) return;
+    const thumbnail = thumbnails[selectedIndex];
+    if (thumbnail) onGenerate?.([thumbnail.blob]);
+  };
+
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -202,6 +298,13 @@ export const ThumbnailGenerator: React.FC<ThumbnailGeneratorProps> = ({
               </div>
             )}
           </button>
+
+          {error && (
+            <div className="mt-3 p-3 bg-red-50 text-red-700 rounded-lg text-sm flex items-start space-x-2">
+              <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
         </div>
         
         <div className="md:col-span-2">
@@ -236,12 +339,12 @@ export const ThumbnailGenerator: React.FC<ThumbnailGeneratorProps> = ({
               <div className="space-y-2">
                 <label className="block text-sm font-medium text-gray-700">Format</label>
                 <div className="grid grid-cols-3 gap-1">
-                  {['jpg', 'png', 'webp'].map(format => (
+                  {FORMATS.map(format => (
                     <button
                       key={format}
                       onClick={() => setSettings({
                         ...settings,
-                        format: format as any
+                        format
                       })}
                       className={`py-1 rounded-lg text-xs ${
                         settings.format === format
@@ -329,17 +432,12 @@ export const ThumbnailGenerator: React.FC<ThumbnailGeneratorProps> = ({
                   Aspect Ratio
                 </label>
                 <div className="grid grid-cols-4 gap-2">
-                  {[
-                    { id: '16:9', label: 'Landscape 16:9' },
-                    { id: '9:16', label: 'Portrait 9:16' },
-                    { id: '1:1', label: 'Square 1:1' },
-                    { id: '4:3', label: 'Standard 4:3' }
-                  ].map(ratio => (
+                  {ASPECT_RATIOS.map(ratio => (
                     <button
                       key={ratio.id}
                       onClick={() => setSettings({
                         ...settings,
-                        aspectRatio: ratio.id as any
+                        aspectRatio: ratio.id
                       })}
                       className={`py-2 text-sm rounded-lg ${
                         settings.aspectRatio === ratio.id
@@ -362,7 +460,7 @@ export const ThumbnailGenerator: React.FC<ThumbnailGeneratorProps> = ({
         <div className="space-y-4">
           <h3 className="text-lg font-medium">Generated Thumbnails</h3>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-            {thumbnails.map((url, index) => (
+            {thumbnails.map((thumbnail, index) => (
               <div
                 key={index}
                 className={`relative aspect-video bg-gray-100 rounded-lg overflow-hidden cursor-pointer group ${
@@ -371,14 +469,14 @@ export const ThumbnailGenerator: React.FC<ThumbnailGeneratorProps> = ({
                 onClick={() => setSelectedIndex(selectedIndex === index ? null : index)}
               >
                 <img
-                  src={url}
+                  src={thumbnail.url}
                   alt={`Thumbnail ${index + 1}`}
                   className="w-full h-full object-cover"
                 />
                 <div className="absolute inset-0 bg-black opacity-0 group-hover:opacity-30 transition-opacity"></div>
                 <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
                   <a 
-                    href={url} 
+                    href={thumbnail.url} 
                     download={`thumbnail-${index + 1}.${settings.format}`}
                     className="p-1.5 bg-white rounded-full text-gray-700 hover:text-gray-900 shadow-md"
                     onClick={(e) => e.stopPropagation()}
@@ -398,13 +496,15 @@ export const ThumbnailGenerator: React.FC<ThumbnailGeneratorProps> = ({
           
           {selectedIndex !== null && (
             <div className="flex justify-end space-x-2">
-              <button 
+              <button
+                onClick={copySelected}
                 className="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 text-sm flex items-center space-x-1"
               >
                 <Copy className="w-4 h-4" />
                 <span>Copy</span>
               </button>
-              <button 
+              <button
+                onClick={useSelected}
                 className="px-3 py-1.5 bg-[#E44E51] text-white rounded-lg hover:bg-[#D43B3E] shadow-sm text-sm flex items-center space-x-1"
               >
                 <ArrowRight className="w-4 h-4" />

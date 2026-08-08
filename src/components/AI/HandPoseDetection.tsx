@@ -1,48 +1,72 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as tf from '@tensorflow/tfjs';
 import * as handPoseDetection from '@tensorflow-models/hand-pose-detection';
-import { HandDetector } from '@tensorflow-models/hand-pose-detection';
+import { Hand, HandDetector, Keypoint } from '@tensorflow-models/hand-pose-detection';
 import { Loader, Settings } from 'lucide-react';
+
+interface HandPoseSettings {
+  minConfidence: number;
+  maxHands: number;
+  drawPoints: boolean;
+  drawSkeleton: boolean;
+  pointColor: string;
+  skeletonColor: string;
+  gestureDetection: boolean;
+}
+
+const DEFAULT_SETTINGS: HandPoseSettings = {
+  minConfidence: 0.5,
+  maxHands: 2,
+  drawPoints: true,
+  drawSkeleton: true,
+  pointColor: '#00FF00',
+  skeletonColor: '#00FF00',
+  gestureDetection: true
+};
 
 interface HandPoseDetectionProps {
   videoRef: React.RefObject<HTMLVideoElement>;
   enabled: boolean;
-  onHandsDetected?: (hands: any[]) => void;
-  settings?: {
-    minConfidence?: number;
-    maxHands?: number;
-    drawPoints?: boolean;
-    drawSkeleton?: boolean;
-    pointColor?: string;
-    skeletonColor?: string;
-    gestureDetection?: boolean;
-  };
+  onHandsDetected?: (hands: Hand[]) => void;
+  settings?: Partial<HandPoseSettings>;
 }
 
 export const HandPoseDetection: React.FC<HandPoseDetectionProps> = ({
   videoRef,
   enabled,
   onHandsDetected,
-  settings = {
-    minConfidence: 0.5,
-    maxHands: 2,
-    drawPoints: true,
-    drawSkeleton: true,
-    pointColor: '#00FF00',
-    skeletonColor: '#00FF00',
-    gestureDetection: true
-  }
+  settings
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [model, setModel] = useState<HandDetector | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [lastDetectedGestures, setLastDetectedGestures] = useState<string[]>([]);
 
+  // Panel edits are kept locally instead of mutating the (read-only) props.
+  const [settingsOverrides, setSettingsOverrides] = useState<Partial<HandPoseSettings>>({});
+  const {
+    minConfidence, maxHands, drawPoints, drawSkeleton, pointColor, skeletonColor, gestureDetection
+  }: HandPoseSettings = { ...DEFAULT_SETTINGS, ...settings, ...settingsOverrides };
+
+  const updateSetting = <K extends keyof HandPoseSettings>(
+    key: K,
+    value: HandPoseSettings[K]
+  ) => {
+    setSettingsOverrides(prev => ({ ...prev, [key]: value }));
+  };
+
+  // Keep the latest callback in a ref so the detection loop is not restarted
+  // on every parent render.
+  const onHandsDetectedRef = useRef(onHandsDetected);
+  useEffect(() => {
+    onHandsDetectedRef.current = onHandsDetected;
+  }, [onHandsDetected]);
+
   useEffect(() => {
     let isMounted = true;
+    let localModel: HandDetector | null = null;
 
     const initializeModel = async () => {
       if (!enabled) return;
@@ -53,20 +77,24 @@ export const HandPoseDetection: React.FC<HandPoseDetectionProps> = ({
       try {
         // Ensure TensorFlow.js backend is initialized
         await tf.ready();
-        
+
         // Load the hand pose detection model
         const detector = await handPoseDetection.createDetector(
           handPoseDetection.SupportedModels.MediaPipeHands,
           {
             runtime: 'tfjs',
             modelType: 'full',
-            maxHands: settings.maxHands || 2
+            maxHands
           }
         );
+
+        localModel = detector;
 
         if (isMounted) {
           setModel(detector);
           setIsLoading(false);
+        } else {
+          detector.dispose();
         }
       } catch (err) {
         console.error('Failed to load hand pose detection model:', err);
@@ -81,80 +109,127 @@ export const HandPoseDetection: React.FC<HandPoseDetectionProps> = ({
 
     return () => {
       isMounted = false;
-      // No explicit model disposal method for hand-pose-detection
-    };
-  }, [enabled, settings.maxHands]);
-
-  useEffect(() => {
-    let animationFrame: number;
-    let isDetecting = false;
-
-    const detectHands = async () => {
-      if (!model || !videoRef.current || !canvasRef.current || !enabled || isDetecting || isLoading) {
-        return;
-      }
-
-      isDetecting = true;
-
+      // Release the detector's GPU/CPU memory
       try {
-        const hands = await model.estimateHands(videoRef.current);
-        
-        if (onHandsDetected) {
-          onHandsDetected(hands);
-        }
-
-        // Process gestures if enabled
-        if (settings.gestureDetection) {
-          const gestures = hands.map(hand => detectGesture(hand));
-          setLastDetectedGestures(gestures.filter(g => g !== 'unknown'));
-        }
-
-        drawHandPose(hands);
-      } catch (err) {
-        console.error('Hand pose detection error:', err);
-      } finally {
-        isDetecting = false;
+        localModel?.dispose();
+      } catch (disposeError) {
+        console.warn('Failed to dispose hand pose model:', disposeError);
       }
-
-      animationFrame = requestAnimationFrame(detectHands);
+      setModel(null);
     };
+  }, [enabled, maxHands]);
 
-    if (enabled && model && !isLoading) {
-      detectHands();
+  const detectGesture = useCallback((hand: Hand): string => {
+    if (!hand || !hand.keypoints || hand.keypoints.length < 21) return 'unknown';
+
+    const keypoints = hand.keypoints;
+    const thumbTip = keypoints[4];
+    const indexTip = keypoints[8];
+    const middleTip = keypoints[12];
+    const ringTip = keypoints[16];
+    const pinkyTip = keypoints[20];
+    const wrist = keypoints[0];
+
+    // Helper function to calculate distance between points
+    const distance = (p1: Keypoint, p2: Keypoint) =>
+      Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
+
+    // Calculate distances for gesture detection
+    const thumbToIndex = distance(thumbTip, indexTip);
+
+    // Calculate finger heights from wrist
+    const thumbHeight = distance(thumbTip, wrist);
+    const indexHeight = distance(indexTip, wrist);
+    const middleHeight = distance(middleTip, wrist);
+    const ringHeight = distance(ringTip, wrist);
+    const pinkyHeight = distance(pinkyTip, wrist);
+
+    // Define thresholds for gesture recognition
+    const closeThreshold = 40; // Threshold for considering fingers "close"
+    const extendedThreshold = 0.6; // Threshold for considering a finger "extended"
+
+    // Peace sign (V) - index and middle extended, others folded
+    if (indexHeight > extendedThreshold * middleHeight &&
+        middleHeight > extendedThreshold * ringHeight &&
+        ringHeight < 0.7 * middleHeight &&
+        pinkyHeight < 0.7 * middleHeight) {
+      return 'Peace';
     }
 
-    return () => {
-      if (animationFrame) {
-        cancelAnimationFrame(animationFrame);
-      }
-    };
-  }, [model, enabled, isLoading, onHandsDetected, settings]);
+    // Thumbs up - thumb extended, others folded
+    if (thumbHeight > extendedThreshold * indexHeight &&
+        indexHeight < 0.7 * thumbHeight &&
+        middleHeight < 0.7 * thumbHeight &&
+        ringHeight < 0.7 * thumbHeight &&
+        pinkyHeight < 0.7 * thumbHeight) {
+      return 'Thumbs Up';
+    }
 
-  const drawHandPose = (hands: any[]) => {
+    // Pointing - index extended, others folded
+    if (indexHeight > extendedThreshold * thumbHeight &&
+        indexHeight > extendedThreshold * middleHeight &&
+        middleHeight < 0.7 * indexHeight &&
+        ringHeight < 0.7 * indexHeight &&
+        pinkyHeight < 0.7 * indexHeight) {
+      return 'Pointing';
+    }
+
+    // Open hand - all fingers extended
+    if (thumbHeight > 0.5 * indexHeight &&
+        indexHeight > 0.7 * middleHeight &&
+        middleHeight > 0.7 * ringHeight &&
+        ringHeight > 0.7 * pinkyHeight &&
+        pinkyHeight > 0.5 * indexHeight) {
+      return 'Open Hand';
+    }
+
+    // Pinch - thumb and index close together, others extended
+    if (thumbToIndex < closeThreshold &&
+        indexHeight > 0.7 * middleHeight) {
+      return 'Pinch';
+    }
+
+    // Fist - all fingers folded
+    if (thumbHeight < 0.5 * distance(wrist, keypoints[5]) &&
+        indexHeight < 0.5 * distance(wrist, keypoints[5]) &&
+        middleHeight < 0.5 * distance(wrist, keypoints[9]) &&
+        ringHeight < 0.5 * distance(wrist, keypoints[13]) &&
+        pinkyHeight < 0.5 * distance(wrist, keypoints[17])) {
+      return 'Fist';
+    }
+
+    return 'unknown';
+  }, []);
+
+  const drawHandPose = useCallback((hands: Hand[]) => {
     if (!canvasRef.current || !videoRef.current) return;
 
-    const ctx = canvasRef.current.getContext('2d');
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     // Match canvas size to video
-    canvasRef.current.width = videoRef.current.videoWidth;
-    canvasRef.current.height = videoRef.current.videoHeight;
+    if (canvas.width !== videoRef.current.videoWidth ||
+        canvas.height !== videoRef.current.videoHeight) {
+      canvas.width = videoRef.current.videoWidth;
+      canvas.height = videoRef.current.videoHeight;
+    }
 
     // Clear previous drawings
-    ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     hands.forEach((hand) => {
       const score = hand.score;
-      if (score < (settings.minConfidence || 0.5)) return;
-      
+      if (score < minConfidence) return;
+
       const keypoints = hand.keypoints;
       const handedness = hand.handedness; // 'Left' or 'Right'
-      
+
       // Color based on handedness
-      const color = handedness === 'Left' ? settings.pointColor : '#FFCC00';
-      
+      const color = handedness === 'Left' ? pointColor : '#FFCC00';
+
       // Draw points if enabled
-      if (settings.drawPoints) {
+      if (drawPoints) {
         ctx.fillStyle = color;
         for (const point of keypoints) {
           ctx.beginPath();
@@ -162,9 +237,9 @@ export const HandPoseDetection: React.FC<HandPoseDetectionProps> = ({
           ctx.fill();
         }
       }
-      
+
       // Draw skeleton if enabled
-      if (settings.drawSkeleton) {
+      if (drawSkeleton) {
         const fingers = [
           [0, 1, 2, 3, 4],           // thumb
           [0, 5, 6, 7, 8],           // index finger
@@ -172,26 +247,27 @@ export const HandPoseDetection: React.FC<HandPoseDetectionProps> = ({
           [0, 13, 14, 15, 16],       // ring finger
           [0, 17, 18, 19, 20]        // pinky
         ];
-        
-        ctx.strokeStyle = settings.skeletonColor || '#00FF00';
+
+        ctx.strokeStyle = skeletonColor;
         ctx.lineWidth = 2;
-        
+
         for (const finger of fingers) {
-          const points = finger.map(idx => keypoints[idx]);
-          
+          const points = finger.map(idx => keypoints[idx]).filter(Boolean);
+          if (points.length < 2) continue;
+
           ctx.beginPath();
           ctx.moveTo(points[0].x, points[0].y);
-          
+
           for (let i = 1; i < points.length; i++) {
             ctx.lineTo(points[i].x, points[i].y);
           }
-          
+
           ctx.stroke();
         }
       }
-      
+
       // Draw gesture label if detected
-      if (settings.gestureDetection && lastDetectedGestures.length > 0) {
+      if (gestureDetection && lastDetectedGestures.length > 0) {
         const gesture = detectGesture(hand);
         if (gesture !== 'unknown') {
           ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
@@ -203,90 +279,65 @@ export const HandPoseDetection: React.FC<HandPoseDetectionProps> = ({
         }
       }
     });
-  };
+  }, [videoRef, minConfidence, pointColor, drawPoints, drawSkeleton, skeletonColor,
+      gestureDetection, lastDetectedGestures, detectGesture]);
 
-  const detectGesture = (hand: any): string => {
-    if (!hand || !hand.keypoints || hand.keypoints.length < 21) return 'unknown';
-    
-    const keypoints = hand.keypoints;
-    const thumbTip = keypoints[4];
-    const indexTip = keypoints[8];
-    const middleTip = keypoints[12];
-    const ringTip = keypoints[16];
-    const pinkyTip = keypoints[20];
-    const wrist = keypoints[0];
-    
-    // Helper function to calculate distance between points
-    const distance = (p1: any, p2: any) => 
-      Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
-    
-    // Calculate distances for gesture detection
-    const thumbToIndex = distance(thumbTip, indexTip);
-    const indexToMiddle = distance(indexTip, middleTip);
-    
-    // Calculate finger heights from wrist
-    const thumbHeight = distance(thumbTip, wrist);
-    const indexHeight = distance(indexTip, wrist);
-    const middleHeight = distance(middleTip, wrist);
-    const ringHeight = distance(ringTip, wrist);
-    const pinkyHeight = distance(pinkyTip, wrist);
-    
-    // Define thresholds for gesture recognition
-    const closeThreshold = 40; // Threshold for considering fingers "close"
-    const extendedThreshold = 0.6; // Threshold for considering a finger "extended"
-    
-    // Peace sign (V) - index and middle extended, others folded
-    if (indexHeight > extendedThreshold * middleHeight && 
-        middleHeight > extendedThreshold * ringHeight &&
-        ringHeight < 0.7 * middleHeight &&
-        pinkyHeight < 0.7 * middleHeight) {
-      return 'Peace';
+  useEffect(() => {
+    let animationFrame: number | undefined;
+    let isDetecting = false;
+    let cancelled = false;
+
+    const detectHands = async () => {
+      if (cancelled) return;
+
+      const video = videoRef.current;
+
+      if (!model || !video || !canvasRef.current || !enabled || isDetecting || isLoading) {
+        return;
+      }
+
+      // Wait until the video actually has a frame to analyse
+      if (video.readyState < 2 || !video.videoWidth || !video.videoHeight) {
+        animationFrame = requestAnimationFrame(detectHands);
+        return;
+      }
+
+      isDetecting = true;
+
+      try {
+        const hands = await model.estimateHands(video, { flipHorizontal: false });
+
+        onHandsDetectedRef.current?.(hands);
+
+        // Process gestures if enabled
+        if (gestureDetection) {
+          const gestures = hands.map(hand => detectGesture(hand));
+          setLastDetectedGestures(gestures.filter(g => g !== 'unknown'));
+        }
+
+        drawHandPose(hands);
+      } catch (err) {
+        console.error('Hand pose detection error:', err);
+      } finally {
+        isDetecting = false;
+      }
+
+      if (!cancelled) {
+        animationFrame = requestAnimationFrame(detectHands);
+      }
+    };
+
+    if (enabled && model && !isLoading) {
+      detectHands();
     }
-    
-    // Thumbs up - thumb extended, others folded
-    if (thumbHeight > extendedThreshold * indexHeight &&
-        indexHeight < 0.7 * thumbHeight &&
-        middleHeight < 0.7 * thumbHeight &&
-        ringHeight < 0.7 * thumbHeight &&
-        pinkyHeight < 0.7 * thumbHeight) {
-      return 'Thumbs Up';
-    }
-    
-    // Pointing - index extended, others folded
-    if (indexHeight > extendedThreshold * thumbHeight &&
-        indexHeight > extendedThreshold * middleHeight &&
-        middleHeight < 0.7 * indexHeight &&
-        ringHeight < 0.7 * indexHeight &&
-        pinkyHeight < 0.7 * indexHeight) {
-      return 'Pointing';
-    }
-    
-    // Open hand - all fingers extended
-    if (thumbHeight > 0.5 * indexHeight &&
-        indexHeight > 0.7 * middleHeight &&
-        middleHeight > 0.7 * ringHeight &&
-        ringHeight > 0.7 * pinkyHeight &&
-        pinkyHeight > 0.5 * indexHeight) {
-      return 'Open Hand';
-    }
-    
-    // Pinch - thumb and index close together, others extended
-    if (thumbToIndex < closeThreshold &&
-        indexHeight > 0.7 * middleHeight) {
-      return 'Pinch';
-    }
-    
-    // Fist - all fingers folded
-    if (thumbHeight < 0.5 * distance(wrist, keypoints[5]) &&
-        indexHeight < 0.5 * distance(wrist, keypoints[5]) &&
-        middleHeight < 0.5 * distance(wrist, keypoints[9]) &&
-        ringHeight < 0.5 * distance(wrist, keypoints[13]) &&
-        pinkyHeight < 0.5 * distance(wrist, keypoints[17])) {
-      return 'Fist';
-    }
-    
-    return 'unknown';
-  };
+
+    return () => {
+      cancelled = true;
+      if (animationFrame) {
+        cancelAnimationFrame(animationFrame);
+      }
+    };
+  }, [model, enabled, isLoading, videoRef, gestureDetection, drawHandPose, detectGesture]);
 
   if (!enabled) return null;
 
@@ -296,7 +347,7 @@ export const HandPoseDetection: React.FC<HandPoseDetectionProps> = ({
         ref={canvasRef}
         className="absolute inset-0 pointer-events-none"
       />
-      
+
       {/* Settings Button */}
       {enabled && !isLoading && (
         <button
@@ -306,7 +357,7 @@ export const HandPoseDetection: React.FC<HandPoseDetectionProps> = ({
           <Settings className="w-5 h-5" />
         </button>
       )}
-      
+
       {/* Settings Panel */}
       {showSettings && (
         <div className="absolute top-16 right-4 bg-white p-4 rounded-lg shadow-lg z-10 w-64">
@@ -316,57 +367,57 @@ export const HandPoseDetection: React.FC<HandPoseDetectionProps> = ({
               <label className="block text-xs mb-1">Max Hands</label>
               <select
                 className="w-full text-sm rounded border-gray-300"
-                value={settings.maxHands}
-                onChange={(e) => settings.maxHands = Number(e.target.value)}
+                value={maxHands}
+                onChange={(e) => updateSetting('maxHands', Number(e.target.value))}
               >
                 <option value="1">1</option>
                 <option value="2">2</option>
                 <option value="4">4</option>
               </select>
             </div>
-            
+
             <div className="flex justify-between items-center">
               <label className="text-xs">Show Points</label>
               <input
                 type="checkbox"
-                checked={settings.drawPoints}
-                onChange={(e) => settings.drawPoints = e.target.checked}
+                checked={drawPoints}
+                onChange={(e) => updateSetting('drawPoints', e.target.checked)}
                 className="rounded text-[#E44E51]"
               />
             </div>
-            
+
             <div className="flex justify-between items-center">
               <label className="text-xs">Show Skeleton</label>
               <input
                 type="checkbox"
-                checked={settings.drawSkeleton}
-                onChange={(e) => settings.drawSkeleton = e.target.checked}
+                checked={drawSkeleton}
+                onChange={(e) => updateSetting('drawSkeleton', e.target.checked)}
                 className="rounded text-[#E44E51]"
               />
             </div>
-            
+
             <div className="flex justify-between items-center">
               <label className="text-xs">Gesture Detection</label>
               <input
                 type="checkbox"
-                checked={settings.gestureDetection}
-                onChange={(e) => settings.gestureDetection = e.target.checked}
+                checked={gestureDetection}
+                onChange={(e) => updateSetting('gestureDetection', e.target.checked)}
                 className="rounded text-[#E44E51]"
               />
             </div>
           </div>
         </div>
       )}
-      
+
       {/* Gesture Display */}
-      {enabled && settings.gestureDetection && lastDetectedGestures.length > 0 && (
+      {enabled && gestureDetection && lastDetectedGestures.length > 0 && (
         <div className="absolute bottom-4 left-4 bg-black/70 text-white p-2 rounded-lg text-sm">
           <div className="flex items-center space-x-2">
             <span>Gesture: {lastDetectedGestures.join(', ')}</span>
           </div>
         </div>
       )}
-      
+
       {isLoading && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-white">
           <div className="flex items-center space-x-2">
@@ -375,7 +426,7 @@ export const HandPoseDetection: React.FC<HandPoseDetectionProps> = ({
           </div>
         </div>
       )}
-      
+
       {error && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/50">
           <div className="bg-white p-4 rounded-lg text-red-500 max-w-md">

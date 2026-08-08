@@ -26,20 +26,25 @@ export const FloatingPanel: React.FC<FloatingPanelProps> = ({
 
   return (
     <div
+      role="dialog"
+      aria-hidden={!isOpen}
       className={cn(
         "fixed z-50 transition-all duration-300 transform",
         positions[position],
-        isOpen ? "translate-y-0 opacity-100" : "translate-y-4 opacity-0 pointer-events-none",
+        // `invisible` also keeps the hidden panel out of the tab order
+        isOpen ? "translate-y-0 opacity-100" : "translate-y-4 opacity-0 invisible pointer-events-none",
         "bg-white/80 backdrop-blur-lg rounded-xl shadow-xl border border-gray-200",
         className
       )}
     >
       <div className="absolute top-2 right-2">
         <button
+          type="button"
           onClick={onClose}
+          aria-label="Close panel"
           className="p-1 rounded-full hover:bg-gray-100 text-gray-500"
         >
-          <X className="w-4 h-4" />
+          <X className="w-4 h-4" aria-hidden="true" />
         </button>
       </div>
       <div className="p-4">

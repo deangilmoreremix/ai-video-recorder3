@@ -1,7 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Crop, Maximize, RefreshCw, Lock, Unlock, RotateCw as RotateClockwise, Settings, Save, Ratio as AspectRatio, Fullscreen } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { Crop, RefreshCw, Lock, Unlock, RotateCw as RotateClockwise, Settings, Save, Ratio as AspectRatio, Fullscreen } from 'lucide-react';
 
+interface DetectedFace {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
 interface SmartCroppingProps {
   videoRef: React.RefObject<HTMLVideoElement>;
   enabled: boolean;
@@ -47,7 +52,7 @@ export const SmartCropping: React.FC<SmartCroppingProps> = ({
   const [smoothTransitions, setSmoothTransitions] = useState(settings.smoothTransitions);
   const [isProcessing, setIsProcessing] = useState(false);
   const [showControls, setShowControls] = useState(true);
-  const [detectedFaces, setDetectedFaces] = useState<any[]>([]);
+  const [detectedFaces, setDetectedFaces] = useState<DetectedFace[]>([]);
   const [autoTracking, setAutoTracking] = useState(true);
 
   // Initialize canvas and set up initial crop area
@@ -116,6 +121,7 @@ export const SmartCropping: React.FC<SmartCroppingProps> = ({
     return () => {
       video.removeEventListener('loadeddata', updateCanvas);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, videoRef, aspectRatio, crop.width, crop.height]);
 
   // Draw overlay
@@ -360,6 +366,7 @@ export const SmartCropping: React.FC<SmartCroppingProps> = ({
     }
     
     drawOverlay();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aspectRatio, aspectRatioLocked]);
 
   // Simulated face detection for subject tracking
@@ -437,6 +444,7 @@ export const SmartCropping: React.FC<SmartCroppingProps> = ({
         cancelAnimationFrame(animationFrame);
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [followSubject, autoTracking, enabled, crop.width, crop.height, smoothTransitions]);
 
   // Process and apply crop

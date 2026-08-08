@@ -1,17 +1,35 @@
 import React, { useState, useCallback } from 'react';
-import { 
-  Volume2, VolumeX, Settings, Play, Pause, Save, 
-  RotateCcw, Filter, Sliders, Activity, Music,
-  Brain, Wand2, Sparkles, Gauge, Clock, Layers,
-  AlertCircle, ChevronDown, ChevronUp, Eye, Check,
-  Mic, MessageCircle, Scissors, Plus, X
-} from 'lucide-react';
+import { Settings, RotateCcw, Music, Clock, Mic, MessageCircle, Scissors, Plus, X } from 'lucide-react';
 import { Tooltip } from '../ui/Tooltip';
 import { motion, AnimatePresence } from 'framer-motion';
 
+interface AdvancedSilentRemovalSettings {
+  algorithm: string;
+  fftSize: number;
+  smoothing: number;
+  normalization: boolean;
+  frequencyWeighting: string;
+  voiceFrequencyRange: number[];
+  musicFrequencyRange: number[];
+}
+
+interface SilentRemovalSettings {
+  threshold: number;
+  minSilenceDuration: number;
+  padding: number;
+  preserveMusic: boolean;
+  preserveVoice: boolean;
+  autoDetect: boolean;
+  skipIntro: boolean;
+  skipOutro: boolean;
+  skipCredits: boolean;
+  customRanges: { start: number; end: number }[];
+  advanced: AdvancedSilentRemovalSettings;
+}
+
 interface SilentRemovalProps {
   onProcess?: () => void;
-  onSettingsChange?: (settings: any) => void;
+  onSettingsChange?: (settings: SilentRemovalSettings) => void;
 }
 
 export const SilentRemoval: React.FC<SilentRemovalProps> = ({ 
@@ -21,7 +39,7 @@ export const SilentRemoval: React.FC<SilentRemovalProps> = ({
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [settings, setSettings] = useState({
+  const [settings, setSettings] = useState<SilentRemovalSettings>({
     threshold: 0.05,
     minSilenceDuration: 0.5,
     padding: 0.2,
@@ -31,7 +49,7 @@ export const SilentRemoval: React.FC<SilentRemovalProps> = ({
     skipIntro: false,
     skipOutro: false,
     skipCredits: false,
-    customRanges: [] as { start: number; end: number }[],
+    customRanges: [],
     advanced: {
       algorithm: 'rms',
       fftSize: 2048,
@@ -43,7 +61,7 @@ export const SilentRemoval: React.FC<SilentRemovalProps> = ({
     }
   });
 
-  const handleSettingChange = useCallback((key: string, value: any) => {
+  const handleSettingChange = useCallback((key: string, value: number | boolean) => {
     setSettings(prev => {
       const newSettings = { ...prev, [key]: value };
       onSettingsChange?.(newSettings);
@@ -51,7 +69,10 @@ export const SilentRemoval: React.FC<SilentRemovalProps> = ({
     });
   }, [onSettingsChange]);
 
-  const handleAdvancedSettingChange = useCallback((key: string, value: any) => {
+  const handleAdvancedSettingChange = useCallback((
+    key: string,
+    value: string | number | boolean | number[]
+  ) => {
     setSettings(prev => {
       const newSettings = {
         ...prev,

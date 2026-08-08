@@ -1,8 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { 
-  RefreshCw, Settings, Save, Video, 
-  Sliders, Play, Pause, Download, Eye
-} from 'lucide-react';
+import { RefreshCw, Settings, Video, Download, Eye } from 'lucide-react';
 
 interface VideoStabilizationProps {
   videoRef: React.RefObject<HTMLVideoElement>;
@@ -30,7 +27,6 @@ export const VideoStabilization: React.FC<VideoStabilizationProps> = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const outputCanvasRef = useRef<HTMLCanvasElement>(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [showControls, setShowControls] = useState(true);
   const [stabilizationStrength, setStabilizationStrength] = useState(settings.strength);
@@ -80,6 +76,7 @@ export const VideoStabilization: React.FC<VideoStabilizationProps> = ({
       video.removeEventListener('loadeddata', setupCanvas);
       cancelAnimationFrame(animationFrameRef.current);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled]);
 
   // Generate simulated camera motion data
@@ -161,6 +158,7 @@ export const VideoStabilization: React.FC<VideoStabilizationProps> = ({
         startPreview();
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stabilizationStrength, smoothness, cropMargin, method, enabled]);
 
   // Draw current frame with/without stabilization
@@ -276,7 +274,6 @@ export const VideoStabilization: React.FC<VideoStabilizationProps> = ({
       setIsProcessing(true);
       setProgress(0);
       
-      const video = videoRef.current;
       const canvas = outputCanvasRef.current;
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error("Could not get canvas context");
@@ -314,7 +311,7 @@ export const VideoStabilization: React.FC<VideoStabilizationProps> = ({
       setProgress(100);
     } catch (err) {
       console.error("Error stabilizing video:", err);
-      setError(`Failed to stabilize video: ${err.message}`);
+      setError(`Failed to stabilize video: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsProcessing(false);
     }

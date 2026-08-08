@@ -1,15 +1,17 @@
-import React, { useState, useEffect } from 'react';
-import { Camera, Wand2, Sliders, Brain, Sparkles, Scan, Layers } from 'lucide-react';
+import React, { useState } from 'react';
+import { Camera, Wand2, Brain, Sparkles, Scan, Layers } from 'lucide-react';
 import { Tooltip } from '../ui/Tooltip';
+
+type SettingValue = boolean | number | string | string[];
 
 interface AIFeature {
   id: string;
   name: string;
   description: string;
-  icon: any;
+  icon: React.ComponentType<{ className?: string }>;
   enabled: boolean;
   processing?: boolean;
-  settings?: Record<string, any>;
+  settings?: Record<string, SettingValue>;
 }
 
 export const VideoAI: React.FC = () => {
@@ -92,7 +94,7 @@ export const VideoAI: React.FC = () => {
     ));
   };
 
-  const updateFeatureSettings = (id: string, settings: Record<string, any>) => {
+  const updateFeatureSettings = (id: string, settings: Record<string, SettingValue>) => {
     setFeatures(features.map(feature =>
       feature.id === id ? { ...feature, settings: { ...feature.settings, ...settings } } : feature
     ));

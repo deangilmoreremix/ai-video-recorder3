@@ -1,5 +1,5 @@
-import React from 'react';
 import { motion } from 'framer-motion';
+import { Link } from 'react-router-dom';
 import { Camera, Scan, HandMetal, Trash2, Layers, Sparkles, Send, Maximize, Sliders, Wand2, Brain, Smile } from 'lucide-react';
 import Navbar from '../../components/landing/Navbar';
 import Footer from '../../components/landing/Footer';

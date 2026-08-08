@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Camera, Brain, Film, Download, Scissors, ArrowRight, Type, Clock, Sparkles } from 'lucide-react';
+import { Camera, Brain, Download, Scissors, ArrowRight, Sparkles } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 const AnimatedFeatureCards = () => {
@@ -84,62 +84,64 @@ const AnimatedFeatureCards = () => {
           return (
             <motion.div
               key={index}
-              className="bg-white rounded-xl shadow-lg overflow-hidden cursor-pointer relative group"
+              className="bg-white rounded-xl shadow-lg overflow-hidden relative group"
               onMouseEnter={() => setHoveredCard(index)}
               onMouseLeave={() => setHoveredCard(null)}
+              onFocus={() => setHoveredCard(index)}
+              onBlur={() => setHoveredCard(null)}
               whileHover={{ y: -8, boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)" }}
               initial={{ opacity: 0, y: 30 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true, margin: "-50px" }}
               transition={{ duration: 0.5, delay: index * 0.1 }}
             >
-              <div className="p-6">
-                <div className={`w-14 h-14 rounded-full ${feature.color} flex items-center justify-center mb-4`}>
-                  <Icon className="h-7 w-7 text-white" />
+              {/* The whole card is a link so it is reachable with the keyboard */}
+              <Link to={feature.link} className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-[#E44E51] rounded-xl">
+                <div className="p-6">
+                  <div className={`w-14 h-14 rounded-full ${feature.color} flex items-center justify-center mb-4`}>
+                    <Icon className="h-7 w-7 text-white" aria-hidden="true" />
+                  </div>
+                  <h3 className="text-xl font-bold text-gray-900 mb-2">{feature.title}</h3>
+                  <p className="text-gray-600">{feature.description}</p>
                 </div>
-                <h3 className="text-xl font-bold text-gray-900 mb-2">{feature.title}</h3>
-                <p className="text-gray-600">{feature.description}</p>
-              </div>
-              
-              <AnimatePresence>
-                {isHovered && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    transition={{ duration: 0.2 }}
-                    className="overflow-hidden"
-                  >
-                    <div className="px-6 pb-4">
-                      <div className={`w-full h-px ${feature.color} my-2`}></div>
-                      <ul className="space-y-1 mt-2 mb-3">
-                        {feature.details.map((detail, idx) => (
-                          <motion.li 
-                            key={idx} 
-                            className="flex items-start"
-                            initial={{ opacity: 0, x: -10 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            transition={{ duration: 0.2, delay: idx * 0.1 }}
-                          >
-                            <svg className="h-5 w-5 text-green-500 mr-2 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
-                            </svg>
-                            <span className="text-sm text-gray-600">{detail}</span>
-                          </motion.li>
-                        ))}
-                      </ul>
-                      
-                      <Link
-                        to={feature.link}
-                        className="inline-flex items-center text-sm font-medium text-[#E44E51] hover:text-[#D43B3E] group"
-                      >
-                        <span>Learn more</span>
-                        <ArrowRight className="ml-2 w-4 h-4 transition-transform group-hover:translate-x-1" />
-                      </Link>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
+                
+                <AnimatePresence>
+                  {isHovered && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.2 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="px-6 pb-4">
+                        <div className={`w-full h-px ${feature.color} my-2`}></div>
+                        <ul className="space-y-1 mt-2 mb-3">
+                          {feature.details.map((detail, idx) => (
+                            <motion.li 
+                              key={idx} 
+                              className="flex items-start"
+                              initial={{ opacity: 0, x: -10 }}
+                              animate={{ opacity: 1, x: 0 }}
+                              transition={{ duration: 0.2, delay: idx * 0.1 }}
+                            >
+                              <svg aria-hidden="true" focusable="false" className="h-5 w-5 text-green-500 mr-2 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+                              </svg>
+                              <span className="text-sm text-gray-600">{detail}</span>
+                            </motion.li>
+                          ))}
+                        </ul>
+                        
+                        <span className="inline-flex items-center text-sm font-medium text-[#E44E51] group-hover:text-[#D43B3E]">
+                          <span>Learn more</span>
+                          <ArrowRight className="ml-2 w-4 h-4 transition-transform group-hover:translate-x-1" aria-hidden="true" />
+                        </span>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </Link>
               
               <div 
                 className={`absolute bottom-0 left-0 right-0 h-1 ${feature.color} transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300 origin-left`}

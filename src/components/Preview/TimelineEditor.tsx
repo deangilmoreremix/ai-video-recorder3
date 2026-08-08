@@ -1,8 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { 
-  Scissors, Plus, ChevronRight, ChevronLeft, Clock, 
-  Layers, Play, Pause, SkipBack, SkipForward, Maximize2 
-} from 'lucide-react';
+import { Scissors, Plus, Layers, Play, Pause, SkipBack, SkipForward, Maximize2 } from 'lucide-react';
 import { Tooltip } from '../ui/Tooltip';
 
 interface TimelineEditorProps {
@@ -21,6 +18,13 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
   const [snapToGrid, setSnapToGrid] = useState(false);
   const [markers, setMarkers] = useState<number[]>([]);
   const timelineRef = useRef<HTMLDivElement>(null);
+
+  // Avoid NaN positions before the media duration is known
+  const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : 0;
+  const toPercent = (time: number) =>
+    safeDuration > 0 ? `${Math.min(100, Math.max(0, (time / safeDuration) * 100))}%` : '0%';
+  // One tick per second, capped so long recordings cannot freeze the UI
+  const tickCount = Math.min(Math.ceil(safeDuration), 120);
 
   const addMarker = () => {
     setMarkers([...markers, currentTime].sort((a, b) => a - b));
@@ -132,7 +136,7 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
       >
         {/* Time markers */}
         <div className="absolute top-0 left-0 w-full h-6 flex">
-          {Array.from({ length: Math.ceil(duration) }).map((_, i) => (
+          {Array.from({ length: tickCount }).map((_, i) => (
             <div 
               key={i}
               className="flex-1 border-r border-gray-700 text-xs p-1 text-gray-400"
@@ -147,14 +151,14 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
           <div
             key={index}
             className="absolute top-6 bottom-0 w-0.5 bg-red-500"
-            style={{ left: `${(time / duration) * 100}%` }}
+            style={{ left: toPercent(time) }}
           />
         ))}
 
         {/* Playhead */}
         <div
           className="absolute top-6 bottom-0 w-0.5 bg-blue-500"
-          style={{ left: `${(currentTime / duration) * 100}%` }}
+          style={{ left: toPercent(currentTime) }}
         />
 
         {/* Waveform visualization */}
@@ -165,7 +169,7 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
 
       <div className="mt-4 flex justify-between text-sm text-gray-600">
         <div>Current: {currentTime.toFixed(1)}s</div>
-        <div>Duration: {duration.toFixed(1)}s</div>
+        <div>Duration: {safeDuration.toFixed(1)}s</div>
       </div>
     </div>
   );

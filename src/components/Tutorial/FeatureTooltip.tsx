@@ -32,10 +32,11 @@ export const FeatureTooltip: React.FC<FeatureTooltipProps> = ({
     <div className="relative group">
       {children}
       <motion.div
+        role="tooltip"
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
-        className={`absolute z-50 ${positionClasses[position]} hidden group-hover:block`}
+        className={`absolute z-50 pointer-events-none ${positionClasses[position]} hidden group-hover:block group-focus-within:block`}
       >
         <div className="relative">
           <div className="bg-[#E44E51] text-white p-3 rounded-lg shadow-lg max-w-xs">
@@ -43,6 +44,7 @@ export const FeatureTooltip: React.FC<FeatureTooltipProps> = ({
             <p className="text-sm opacity-90">{description}</p>
           </div>
           <div 
+            aria-hidden="true"
             className={`absolute w-3 h-3 border-4 border-transparent ${arrowClasses[position]}`}
           />
         </div>

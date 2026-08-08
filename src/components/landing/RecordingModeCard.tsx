@@ -16,9 +16,11 @@ const RecordingModeCard: React.FC<RecordingModeCardProps> = ({
   image,
   features
 }) => {
-  // Handle image loading errors
+  // Handle image loading errors (guarded against a failing fallback loop)
   const handleImageError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
-    console.error(`Failed to load image: ${image}`);
+    if (e.currentTarget.dataset.fallbackApplied) return;
+    e.currentTarget.dataset.fallbackApplied = 'true';
+    console.warn(`Failed to load image: ${image}`);
     // Set a fallback image
     e.currentTarget.src = 'https://images.unsplash.com/photo-1581472723648-909f4851d4ae?auto=format&fit=crop&w=1000&q=80';
     e.currentTarget.alt = 'Recording mode';
@@ -33,6 +35,7 @@ const RecordingModeCard: React.FC<RecordingModeCardProps> = ({
         <img
           src={image}
           alt={title}
+          loading="lazy"
           onError={handleImageError}
           className="w-full h-full object-cover transition-transform duration-500 hover:scale-110"
         />

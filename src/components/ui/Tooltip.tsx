@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 
 interface TooltipProps {
   content: string;
@@ -16,15 +16,30 @@ export const Tooltip: React.FC<TooltipProps> = ({
   maxWidth = '300px'
 }) => {
   const [show, setShow] = useState(false);
-  const [timeoutId, setTimeoutId] = useState<number>();
+  const timeoutRef = useRef<number>();
+  const tooltipId = useId();
 
-  const handleMouseEnter = () => {
-    const id = window.setTimeout(() => setShow(true), delay);
-    setTimeoutId(id);
+  const clearPendingShow = () => {
+    if (timeoutRef.current !== undefined) {
+      window.clearTimeout(timeoutRef.current);
+      timeoutRef.current = undefined;
+    }
   };
 
-  const handleMouseLeave = () => {
-    clearTimeout(timeoutId);
+  // Never leave a pending timer behind (it would call setState after unmount)
+  useEffect(() => clearPendingShow, []);
+
+  const handleShow = () => {
+    clearPendingShow();
+    if (delay > 0) {
+      timeoutRef.current = window.setTimeout(() => setShow(true), delay);
+    } else {
+      setShow(true);
+    }
+  };
+
+  const handleHide = () => {
+    clearPendingShow();
     setShow(false);
   };
 
@@ -45,13 +60,18 @@ export const Tooltip: React.FC<TooltipProps> = ({
   return (
     <div 
       className="relative inline-block"
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
+      onMouseEnter={handleShow}
+      onMouseLeave={handleHide}
+      onFocus={handleShow}
+      onBlur={handleHide}
+      aria-describedby={show ? tooltipId : undefined}
     >
       {children}
       {show && (
         <div 
-          className={`absolute z-50 ${positionClasses[position]}`}
+          id={tooltipId}
+          role="tooltip"
+          className={`absolute z-50 pointer-events-none ${positionClasses[position]}`}
           style={{ maxWidth }}
         >
           <div className="relative">
@@ -63,6 +83,7 @@ export const Tooltip: React.FC<TooltipProps> = ({
               ))}
             </div>
             <div 
+              aria-hidden="true"
               className={`absolute w-3 h-3 border-4 border-transparent ${arrowClasses[position]}`}
             />
           </div>

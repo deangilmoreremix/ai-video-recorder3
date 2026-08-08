@@ -1,13 +1,6 @@
 import React, { useState } from 'react';
-import { 
-  Type, Image, Music, Settings, Palette, Clock,
-  AlignLeft, AlignCenter, AlignRight, Bold, Italic,
-  X, Save, Upload, Play, Download, Share2, Film,
-  Camera, Wand2, Sparkles, Layers, Focus, Brain,
-  CloudFog, Plus, Trash2, Eye, Volume2, VolumeX
-} from 'lucide-react';
+import { Type, Image, Music, Palette, Clock, AlignLeft, AlignCenter, AlignRight, X, Play, Volume2, VolumeX } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { Tooltip } from '../ui/Tooltip';
 
 interface IntroEditorProps {
   templateId: string | null;
@@ -16,7 +9,6 @@ interface IntroEditorProps {
 }
 
 export const IntroEditor: React.FC<IntroEditorProps> = ({
-  templateId,
   isEditing,
   onClose
 }) => {

@@ -1,7 +1,7 @@
-import React, { useRef, useEffect } from 'react';
+import { useRef, useEffect } from 'react';
 import { motion, useInView } from 'framer-motion';
 import { Link } from 'react-router-dom';
-import { Image, Play, Pause, Download, Settings, Sparkles, Wand2, ChevronRight, Palette, Sliders } from 'lucide-react';
+import { Image, Download, Sparkles, Wand2, ChevronRight, Palette, Sliders } from 'lucide-react';
 import lottie from 'lottie-web';
 
 import Navbar from '../../components/landing/Navbar';

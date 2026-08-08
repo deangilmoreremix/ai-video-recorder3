@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef } from 'react';
+import * as blazeface from '@tensorflow-models/blazeface';
 import { FaceDetection } from './FaceDetection';
 import { FacialLandmarkDetection } from './FacialLandmarkDetection';
 import { Settings, Layers, Sliders, Monitor, Eye } from 'lucide-react';
@@ -28,14 +29,14 @@ export const AdvancedFaceRecognition: React.FC<AdvancedFaceRecognitionProps> = (
   });
   
   const [showSettings, setShowSettings] = useState(false);
-  const [detectedFaces, setDetectedFaces] = useState<any[]>([]);
+  const [detectedFaces, setDetectedFaces] = useState<blazeface.NormalizedFace[]>([]);
   const overlayRef = useRef<HTMLDivElement>(null);
 
-  const handleFaceDetected = (faces: any[]) => {
+  const handleFaceDetected = (faces: blazeface.NormalizedFace[]) => {
     setDetectedFaces(faces);
   };
 
-  const handleLandmarksDetected = (faces: any[]) => {
+  const handleLandmarksDetected = () => {
     // Additional processing if needed
   };
 
@@ -46,7 +47,7 @@ export const AdvancedFaceRecognition: React.FC<AdvancedFaceRecognitionProps> = (
     }));
   };
 
-  const updateSetting = (key: string, value: any) => {
+  const updateSetting = (key: keyof typeof settings, value: boolean | number | string) => {
     setSettings(prev => ({
       ...prev,
       [key]: value

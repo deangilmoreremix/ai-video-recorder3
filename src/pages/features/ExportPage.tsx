@@ -1,8 +1,9 @@
-import React, { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { motion, useInView } from 'framer-motion';
 import { Link } from 'react-router-dom';
-import { Download, Film, Share2, Youtube, Twitter, Facebook, Instagram, Linkedin, Copy, ChevronRight } from 'lucide-react';
+import { Film, Youtube, Twitter, Facebook, Instagram, Linkedin, ChevronRight } from 'lucide-react';
 import lottie from 'lottie-web';
+import type { AnimationItem } from 'lottie-web';
 
 import Navbar from '../../components/landing/Navbar';
 import Footer from '../../components/landing/Footer';
@@ -16,27 +17,34 @@ const ExportPage = () => {
   const [selectedTab, setSelectedTab] = useState('formats');
 
   useEffect(() => {
+    const animations: AnimationItem[] = [];
+
     // Initialize export animation
     if (exportAnimRef.current) {
-      lottie.loadAnimation({
+      animations.push(lottie.loadAnimation({
         container: exportAnimRef.current,
         renderer: 'svg',
         loop: true,
         autoplay: true,
         path: 'https://assets8.lottiefiles.com/packages/lf20_bkoSPf.json' // Export animation
-      });
+      }));
     }
     
     // Initialize download animation
     if (downloadRef.current) {
-      lottie.loadAnimation({
+      animations.push(lottie.loadAnimation({
         container: downloadRef.current,
         renderer: 'svg',
         loop: true,
         autoplay: true,
         path: 'https://assets1.lottiefiles.com/packages/lf20_cmaqoazd.json' // Download animation
-      });
+      }));
     }
+
+    // Without this the players keep running (and leak) after navigation.
+    return () => {
+      animations.forEach((animation) => animation.destroy());
+    };
   }, []);
 
   // Define export formats

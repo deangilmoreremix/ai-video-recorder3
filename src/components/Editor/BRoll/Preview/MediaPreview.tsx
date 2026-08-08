@@ -3,7 +3,7 @@ import {
   Play, Pause, Volume2, VolumeX, Maximize2, Minimize2,
   SkipBack, SkipForward, X, Download, Share2
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 
 interface MediaPreviewProps {
   url: string;

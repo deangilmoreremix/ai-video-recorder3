@@ -1,14 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { 
-  Brain, Sparkles, Layout, Focus, CloudFog, Zap, 
-  Wind, Palette, Gauge, Eye, Scan, Settings, Play,
-  Pause, Download, Share2
-} from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { Brain, Sparkles, Settings, Play, Pause, Download, Share2 } from 'lucide-react';
 import { useAIFeatures } from '../../hooks/useAIFeatures';
+import { createMediaRecorder } from '../../hooks/useVideoRecorder';
 import { AIFeatureGrid } from '../AI/AIFeatureGrid';
 import { AIProcessingOverlay } from '../AI/AIProcessingOverlay';
-import { Tooltip } from '../ui/Tooltip';
 
 interface AIPreviewEditorProps {
   videoUrl: string;
@@ -29,7 +24,6 @@ export const AIPreviewEditor: React.FC<AIPreviewEditorProps> = ({
   const {
     features,
     toggleFeature,
-    updateFeatureSettings,
     processFrame,
     isModelsLoaded
   } = useAIFeatures();
@@ -61,15 +55,19 @@ export const AIPreviewEditor: React.FC<AIPreviewEditorProps> = ({
       if (isPlaying) {
         videoRef.current.pause();
       } else {
-        videoRef.current.play();
+        videoRef.current.play().catch(() => setIsPlaying(false));
       }
       setIsPlaying(!isPlaying);
     }
   };
 
   const processVideo = async () => {
+    if (isProcessing) return;
+
     setIsProcessing(true);
     setProgress(0);
+
+    let mediaRecorder: MediaRecorder | null = null;
 
     try {
       // Simulate processing progress
@@ -79,32 +77,54 @@ export const AIPreviewEditor: React.FC<AIPreviewEditorProps> = ({
       }
 
       // Create a new video with AI effects
-      if (videoRef.current && canvasRef.current) {
-        const stream = canvasRef.current.captureStream();
-        const mediaRecorder = new MediaRecorder(stream);
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+
+      if (video && canvas) {
+        const stream = canvas.captureStream();
+        // Codec availability differs per browser – probe before recording
+        mediaRecorder = createMediaRecorder(stream);
+        const recorder = mediaRecorder;
         const chunks: BlobPart[] = [];
 
-        mediaRecorder.ondataavailable = (e) => {
-          chunks.push(e.data);
+        recorder.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) {
+            chunks.push(e.data);
+          }
         };
 
-        mediaRecorder.onstop = () => {
-          const blob = new Blob(chunks, { type: 'video/webm' });
-          onProcessingComplete?.(blob);
+        recorder.onstop = () => {
+          const blob = new Blob(chunks, { type: recorder.mimeType || 'video/webm' });
+          stream.getTracks().forEach(track => track.stop());
+          if (blob.size > 0) {
+            onProcessingComplete?.(blob);
+          }
         };
 
-        mediaRecorder.start();
-        videoRef.current.play();
+        recorder.start(1000);
+        video.currentTime = 0;
+        await video.play().catch(() => undefined);
 
-        // Record for the duration of the video
-        await new Promise(resolve => {
-          videoRef.current!.onended = resolve;
+        // Record for the duration of the video (or until it fails)
+        await new Promise<void>(resolve => {
+          const finish = () => {
+            video.removeEventListener('ended', finish);
+            video.removeEventListener('error', finish);
+            resolve();
+          };
+          video.addEventListener('ended', finish);
+          video.addEventListener('error', finish);
         });
 
-        mediaRecorder.stop();
+        if (recorder.state !== 'inactive') {
+          recorder.stop();
+        }
       }
     } catch (error) {
       console.error('Error processing video:', error);
+      if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+      }
     } finally {
       setIsProcessing(false);
       setProgress(0);
@@ -180,9 +200,8 @@ export const AIPreviewEditor: React.FC<AIPreviewEditorProps> = ({
           AI Features
         </h4>
         <AIFeatureGrid
-          features={features}
-          onToggleFeature={toggleFeature}
-          onUpdateSettings={updateFeatureSettings}
+          enabledFeatures={features}
+          onFeatureToggle={toggleFeature}
           isProcessing={isProcessing}
         />
       </div>

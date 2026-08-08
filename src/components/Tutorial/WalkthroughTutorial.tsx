@@ -1,10 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  HelpCircle, X, ChevronRight, ChevronLeft, Video, 
-  Film, Type, Music, Wand2, Layout, Play, Settings,
-  Camera, Upload, Download, Share2
-} from 'lucide-react';
+import { HelpCircle, X, ChevronRight, ChevronLeft, Film, Type, Music, Wand2, Layout, Play, Camera, Download } from 'lucide-react';
 
 interface WalkthroughTutorialProps {
   isOpen: boolean;
@@ -86,6 +82,26 @@ export const WalkthroughTutorial: React.FC<WalkthroughTutorialProps> = ({
     }
   }, [isOpen]);
 
+  // Close on Escape and prevent the page behind the modal from scrolling
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen, onClose]);
+
+  const step = tutorialSteps[currentStep] ?? tutorialSteps[0];
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -106,6 +122,9 @@ export const WalkthroughTutorial: React.FC<WalkthroughTutorialProps> = ({
 
           {/* Tutorial Content */}
           <motion.div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="walkthrough-title"
             initial={{ scale: 0.95, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0.95, opacity: 0 }}
@@ -113,11 +132,13 @@ export const WalkthroughTutorial: React.FC<WalkthroughTutorialProps> = ({
           >
             {/* Close button */}
             <button
+              type="button"
               onClick={onClose}
+              aria-label="Close tutorial"
               className="absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-600 
                 rounded-full hover:bg-gray-100 transition-colors"
             >
-              <X className="w-5 h-5" />
+              <X className="w-5 h-5" aria-hidden="true" />
             </button>
 
             {/* Progress Bar */}
@@ -133,14 +154,14 @@ export const WalkthroughTutorial: React.FC<WalkthroughTutorialProps> = ({
             {/* Tutorial Content */}
             <div className="mt-6">
               <div className="flex items-center space-x-3 mb-4">
-                {tutorialSteps[currentStep].icon}
-                <h3 className="text-lg font-semibold">
-                  {tutorialSteps[currentStep].title}
+                {step.icon}
+                <h3 id="walkthrough-title" className="text-lg font-semibold">
+                  {step.title}
                 </h3>
               </div>
 
               <p className="text-gray-600 mb-6">
-                {tutorialSteps[currentStep].description}
+                {step.description}
               </p>
 
               <div className="flex justify-between items-center">
@@ -149,21 +170,23 @@ export const WalkthroughTutorial: React.FC<WalkthroughTutorialProps> = ({
                 </div>
                 <div className="flex space-x-2">
                   <button
+                    type="button"
                     onClick={handlePrevious}
                     disabled={currentStep === 0}
                     className="px-4 py-2 text-gray-600 hover:text-gray-800 disabled:opacity-50
                       flex items-center space-x-1"
                   >
-                    <ChevronLeft className="w-4 h-4" />
+                    <ChevronLeft className="w-4 h-4" aria-hidden="true" />
                     <span>Previous</span>
                   </button>
                   <button
+                    type="button"
                     onClick={handleNext}
                     className="px-4 py-2 bg-[#E44E51] text-white rounded-lg hover:bg-[#D43B3E]
                       flex items-center space-x-1"
                   >
                     <span>{currentStep === tutorialSteps.length - 1 ? 'Finish' : 'Next'}</span>
-                    <ChevronRight className="w-4 h-4" />
+                    <ChevronRight className="w-4 h-4" aria-hidden="true" />
                   </button>
                 </div>
               </div>

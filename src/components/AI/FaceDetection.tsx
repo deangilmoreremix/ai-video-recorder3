@@ -1,12 +1,26 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as tf from '@tensorflow/tfjs';
 import * as blazeface from '@tensorflow-models/blazeface';
 import { Loader } from 'lucide-react';
 
+// blazeface types allow tensors even when `returnTensors` is false
+const toNumber = (value: unknown): number | undefined => {
+  if (typeof value === 'number') return value;
+  if (Array.isArray(value) && typeof value[0] === 'number') return value[0];
+  return undefined;
+};
+
+const toPoint = (value: unknown): [number, number] | undefined => {
+  if (Array.isArray(value) && typeof value[0] === 'number' && typeof value[1] === 'number') {
+    return [value[0], value[1]];
+  }
+  return undefined;
+};
+
 interface FaceDetectionProps {
   videoRef: React.RefObject<HTMLVideoElement>;
   enabled: boolean;
-  onFacesDetected?: (faces: any[]) => void;
+  onFacesDetected?: (faces: blazeface.NormalizedFace[]) => void;
   settings?: {
     minConfidence?: number;
     maxFaces?: number;
@@ -26,12 +40,19 @@ export const FaceDetection: React.FC<FaceDetectionProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [model, setModel] = useState<blazeface.BlazeFaceModel | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Keep the latest callback in a ref: using it as an effect dependency would
+  // tear down and restart the detection loop on every parent render.
+  const onFacesDetectedRef = useRef(onFacesDetected);
+  useEffect(() => {
+    onFacesDetectedRef.current = onFacesDetected;
+  }, [onFacesDetected]);
+
   useEffect(() => {
     let isMounted = true;
+    let localModel: blazeface.BlazeFaceModel | null = null;
 
     const initializeModel = async () => {
       if (!enabled) return;
@@ -52,9 +73,13 @@ export const FaceDetection: React.FC<FaceDetectionProps> = ({
           scoreThreshold: settings.minConfidence
         });
 
+        localModel = loadedModel;
+
         if (isMounted) {
           setModel(loadedModel);
           setIsLoading(false);
+        } else {
+          loadedModel.dispose();
         }
       } catch (err) {
         console.error('Failed to load face detection model:', err);
@@ -69,78 +94,42 @@ export const FaceDetection: React.FC<FaceDetectionProps> = ({
 
     return () => {
       isMounted = false;
-      // Cleanup TensorFlow memory
-      if (model) {
-        tf.dispose(model);
+      // Release the GPU memory held by this model instance
+      try {
+        localModel?.dispose();
+      } catch (disposeError) {
+        console.warn('Failed to dispose face detection model:', disposeError);
       }
+      setModel(null);
     };
   }, [enabled, settings.maxFaces, settings.minConfidence]);
 
-  useEffect(() => {
-    let animationFrame: number;
-    let isDetecting = false;
-
-    const detectFaces = async () => {
-      if (!model || !videoRef.current || !canvasRef.current || !enabled || isDetecting || isLoading) {
-        return;
-      }
-
-      isDetecting = true;
-
-      try {
-        // Convert video frame to tensor
-        const videoTensor = tf.browser.fromPixels(videoRef.current);
-        
-        // Run detection
-        const predictions = await model.estimateFaces(videoTensor, false);
-        
-        if (onFacesDetected) {
-          onFacesDetected(predictions);
-        }
-
-        if (settings.drawBoxes) {
-          drawFaceBoxes(predictions);
-        }
-
-        // Clean up tensor
-        videoTensor.dispose();
-      } catch (err) {
-        console.error('Face detection error:', err);
-      } finally {
-        isDetecting = false;
-      }
-
-      animationFrame = requestAnimationFrame(detectFaces);
-    };
-
-    if (enabled && model && !isLoading) {
-      detectFaces();
-    }
-
-    return () => {
-      if (animationFrame) {
-        cancelAnimationFrame(animationFrame);
-      }
-    };
-  }, [model, enabled, isLoading, onFacesDetected, settings.drawBoxes]);
-
-  const drawFaceBoxes = (predictions: any[]) => {
+  const drawFaceBoxes = useCallback((predictions: blazeface.NormalizedFace[]) => {
     if (!canvasRef.current || !videoRef.current) return;
 
     const ctx = canvasRef.current.getContext('2d');
     if (!ctx) return;
 
     // Match canvas size to video
-    canvasRef.current.width = videoRef.current.videoWidth;
-    canvasRef.current.height = videoRef.current.videoHeight;
+    if (canvasRef.current.width !== videoRef.current.videoWidth ||
+        canvasRef.current.height !== videoRef.current.videoHeight) {
+      canvasRef.current.width = videoRef.current.videoWidth;
+      canvasRef.current.height = videoRef.current.videoHeight;
+    }
 
     // Clear previous drawings
     ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
 
     predictions.forEach((prediction) => {
-      if (prediction.probability[0] >= (settings.minConfidence || 0.5)) {
-        const start = prediction.topLeft;
-        const end = prediction.bottomRight;
+      // With `returnTensors === false` blazeface returns plain numbers, but the
+      // published types still allow tensors - normalize before using them.
+      const probability = toNumber(prediction.probability);
+      const start = toPoint(prediction.topLeft);
+      const end = toPoint(prediction.bottomRight);
+
+      if (!start || !end) return;
+
+      if ((probability ?? 1) >= (settings.minConfidence || 0.5)) {
         const size = [end[0] - start[0], end[1] - start[1]];
 
         // Draw face box
@@ -149,24 +138,89 @@ export const FaceDetection: React.FC<FaceDetectionProps> = ({
         ctx.strokeRect(start[0], start[1], size[0], size[1]);
 
         // Draw confidence score
-        ctx.fillStyle = '#E44E51';
-        ctx.font = '12px Arial';
-        ctx.fillText(
-          `${Math.round(prediction.probability[0] * 100)}%`,
-          start[0],
-          start[1] - 5
-        );
+        if (probability !== undefined) {
+          ctx.fillStyle = '#E44E51';
+          ctx.font = '12px Arial';
+          ctx.fillText(
+            `${Math.round(probability * 100)}%`,
+            start[0],
+            start[1] - 5
+          );
+        }
 
         // Draw landmarks
-        prediction.landmarks.forEach((landmark: number[]) => {
-          ctx.fillStyle = '#E44E51';
-          ctx.beginPath();
-          ctx.arc(landmark[0], landmark[1], 2, 0, 2 * Math.PI);
-          ctx.fill();
-        });
+        if (Array.isArray(prediction.landmarks)) {
+          (prediction.landmarks as number[][]).forEach((landmark) => {
+            ctx.fillStyle = '#E44E51';
+            ctx.beginPath();
+            ctx.arc(landmark[0], landmark[1], 2, 0, 2 * Math.PI);
+            ctx.fill();
+          });
+        }
       }
     });
-  };
+  }, [videoRef, settings.minConfidence]);
+
+  useEffect(() => {
+    let animationFrame: number | undefined;
+    let isDetecting = false;
+    let cancelled = false;
+
+    const detectFaces = async () => {
+      if (cancelled) return;
+
+      const video = videoRef.current;
+
+      if (!model || !video || !canvasRef.current || !enabled || isDetecting || isLoading) {
+        return;
+      }
+
+      // The video has no decoded frame yet - fromPixels would throw
+      if (video.readyState < 2 || !video.videoWidth || !video.videoHeight) {
+        animationFrame = requestAnimationFrame(detectFaces);
+        return;
+      }
+
+      isDetecting = true;
+      let videoTensor: tf.Tensor3D | null = null;
+
+      try {
+        // Convert video frame to tensor
+        videoTensor = tf.browser.fromPixels(video);
+        
+        // Run detection
+        const predictions = await model.estimateFaces(videoTensor, false);
+        
+        onFacesDetectedRef.current?.(predictions);
+
+        if (settings.drawBoxes) {
+          drawFaceBoxes(predictions);
+        }
+      } catch (err) {
+        console.error('Face detection error:', err);
+      } finally {
+        // Always clean up the tensor, otherwise every failing frame leaks
+        // a WebGL texture.
+        videoTensor?.dispose();
+        isDetecting = false;
+      }
+
+      if (!cancelled) {
+        animationFrame = requestAnimationFrame(detectFaces);
+      }
+    };
+
+    if (enabled && model && !isLoading) {
+      detectFaces();
+    }
+
+    return () => {
+      cancelled = true;
+      if (animationFrame) {
+        cancelAnimationFrame(animationFrame);
+      }
+    };
+  }, [model, enabled, isLoading, settings.drawBoxes, videoRef, drawFaceBoxes]);
 
   if (!enabled) return null;
 

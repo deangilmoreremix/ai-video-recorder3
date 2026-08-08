@@ -1,11 +1,6 @@
 import React, { useState } from 'react';
-import { 
-  Play, Star, Download, Edit2, Clock, Filter, Search, Grid, List, 
-  SortAsc, Tag, Plus, Palette, Music, Video, Image, Wand2, Layout,
-  Sparkles, Layers, Box, Maximize2, Minimize2, Zap, Camera, Film,
-  Upload, Trash2, Copy, Eye, Settings, Save, Share2, X
-} from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { Play, Edit2, Clock, Search, Grid, List, Plus, Palette, Wand2, Layout, Box, Minimize2, Zap, Copy } from 'lucide-react';
+import { AnimatePresence } from 'framer-motion';
 import { useIntroStore } from '../../store/introStore';
 import { Tooltip } from '../ui/Tooltip';
 import { IntroEditor } from './IntroEditor';

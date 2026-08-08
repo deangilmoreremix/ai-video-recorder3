@@ -1,12 +1,7 @@
 import React, { useState } from 'react';
-import { 
-  Film, Upload, Play, Settings, Download, 
-  Folder, Plus, X, Check, AlertCircle, Wand2,
-  Brain, Sparkles, Layers, Focus, Camera, Scan
-} from 'lucide-react';
+import { Film, Play, Settings, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useDropzone } from 'react-dropzone';
-import { Tooltip } from '../../ui/Tooltip';
 
 interface BatchProcessorProps {
   onProcess: (files: File[]) => Promise<void>;

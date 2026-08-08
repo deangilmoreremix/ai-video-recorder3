@@ -1,8 +1,19 @@
-import React from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Camera, Brain, Film, Download, Mail, Twitter, Youtube, Instagram, Github, Linkedin, Facebook } from 'lucide-react';
+import { Twitter, Youtube, Instagram, Github, Linkedin } from 'lucide-react';
 
 const Footer = () => {
+  const [email, setEmail] = useState('');
+  const [subscribed, setSubscribed] = useState(false);
+
+  const handleSubscribe = (e: React.FormEvent<HTMLFormElement>) => {
+    // Prevent a full page reload - there is no newsletter backend yet.
+    e.preventDefault();
+    if (!email.trim()) return;
+    setSubscribed(true);
+    setEmail('');
+  };
+
   return (
     <footer className="bg-gray-900 text-white pt-16 pb-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -141,10 +152,16 @@ const Footer = () => {
           <div>
             <h3 className="text-sm font-semibold text-white tracking-wider uppercase">Stay Updated</h3>
             <p className="mt-4 text-gray-400">Subscribe to our newsletter for the latest updates</p>
-            <form className="mt-4">
+            <form className="mt-4" onSubmit={handleSubscribe}>
               <div className="flex flex-col sm:flex-row gap-2">
+                <label htmlFor="footer-newsletter-email" className="sr-only">Email address</label>
                 <input
+                  id="footer-newsletter-email"
+                  name="email"
                   type="email"
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                   placeholder="Enter your email"
                   className="min-w-0 flex-auto rounded-md border-0 bg-white/5 px-3.5 py-2 text-white shadow-sm ring-1 ring-inset ring-white/10 focus:ring-2 focus:ring-inset focus:ring-[#E44E51] sm:text-sm sm:leading-6"
                   required
@@ -156,6 +173,9 @@ const Footer = () => {
                   Subscribe
                 </button>
               </div>
+              <p className="mt-2 text-sm text-gray-400" role="status" aria-live="polite">
+                {subscribed ? 'Thanks for subscribing!' : ''}
+              </p>
             </form>
           </div>
         </div>

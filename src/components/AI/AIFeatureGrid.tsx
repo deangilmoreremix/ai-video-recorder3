@@ -1,11 +1,5 @@
 import React from 'react';
-import { 
-  Camera, Brain, Sparkles, Layout, Focus, CloudFog,
-  Zap, Wind, Palette, Gauge, Eye, Scan, Layers,
-  Mic, AlertCircle, HandMetal, Smile, Monitor, Trash,
-  Video, Megaphone, Maximize, Filter, Image, Lightbulb,
-  Wand2, Send, ArrowUp, Vibrate, Film
-} from 'lucide-react';
+import { Camera, Sparkles, Focus, Wind, Palette, Gauge, Scan, Layers, Mic, AlertCircle, HandMetal, Smile, Monitor, Trash, Maximize, Filter, Lightbulb, Wand2, Send, Vibrate } from 'lucide-react';
 import { Tooltip } from '../ui/Tooltip';
 import { motion } from 'framer-motion';
 import { AIFeature } from '../../hooks/useAIFeatures';

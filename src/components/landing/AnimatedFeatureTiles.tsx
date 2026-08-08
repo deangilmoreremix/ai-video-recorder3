@@ -1,15 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence, useAnimation } from 'framer-motion';
+import React, { useMemo, useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Link, useNavigate } from 'react-router-dom';
-import {
-  // Core icons
-  Brain, Camera, Scissors, Type, Clock, Layout, Film, Download, Sparkles,
-  
-  // Advanced icons
-  Wand2, Layers, Mic, Volume2, Palette, Gauge, Smile, HandMetal,
-  Maximize2, Send, Trash2, Focus, Monitor, Grid, Sliders, Zap, Play,
-  Share2, Image, Scan, Eye, ArrowRight, Video, ChevronRight, ChevronDown
-} from 'lucide-react';
+import { // Core icons
+  Brain, Camera, Scissors, Type, Clock, Layout, Film, Download, Sparkles, // Advanced icons
+  Wand2, Layers, Mic, Volume2, Gauge, HandMetal, Trash2, Monitor, Grid, Sliders, Share2, Image, Scan, ArrowRight, Video, ChevronRight } from 'lucide-react';
 
 interface FeatureTile {
   id: string;
@@ -22,26 +16,18 @@ interface FeatureTile {
   link: string;
 }
 
-const AnimatedFeatureTiles: React.FC = () => {
-  const [activeCategory, setActiveCategory] = useState<string | null>(null);
-  const [hoveredTile, setHoveredTile] = useState<string | null>(null);
-  const [isGridView, setIsGridView] = useState(true);
-  const [filteredFeatures, setFilteredFeatures] = useState<FeatureTile[]>([]);
-  const controls = useAnimation();
-  const navigate = useNavigate();
+// Define feature categories
+const CATEGORIES = [
+  { id: 'all', name: 'All Features', icon: Grid },
+  { id: 'ai', name: 'AI Features', icon: Brain },
+  { id: 'recording', name: 'Recording', icon: Video },
+  { id: 'editing', name: 'Editing', icon: Scissors },
+  { id: 'export', name: 'Export', icon: Download },
+  { id: 'animation', name: 'Animation', icon: Sparkles },
+];
 
-  // Define feature categories
-  const categories = [
-    { id: 'all', name: 'All Features', icon: Grid },
-    { id: 'ai', name: 'AI Features', icon: Brain },
-    { id: 'recording', name: 'Recording', icon: Video },
-    { id: 'editing', name: 'Editing', icon: Scissors },
-    { id: 'export', name: 'Export', icon: Download },
-    { id: 'animation', name: 'Animation', icon: Sparkles },
-  ];
-
-  // Complete list of all features
-  const allFeatures: FeatureTile[] = [
+// Complete list of all features
+const ALL_FEATURES: FeatureTile[] = [
     // AI Features
     {
       id: 'face-detection',
@@ -366,29 +352,22 @@ const AnimatedFeatureTiles: React.FC = () => {
       ],
       link: '/features/animation'
     },
-  ];
+];
+
+const AnimatedFeatureTiles: React.FC = () => {
+  const [activeCategory, setActiveCategory] = useState<string>('all');
+  const [hoveredTile, setHoveredTile] = useState<string | null>(null);
+  const [isGridView, setIsGridView] = useState(true);
+  const navigate = useNavigate();
 
   // Filter features based on active category
-  useEffect(() => {
-    let filtered = [...allFeatures];
-    if (activeCategory && activeCategory !== 'all') {
-      filtered = allFeatures.filter(feature => feature.category === activeCategory);
-    }
-    
-    setFilteredFeatures(filtered);
-    
-    // Stagger animation for the tiles
-    controls.start(i => ({
-      opacity: 1,
-      y: 0,
-      transition: { delay: i * 0.05, duration: 0.5 }
-    }));
-  }, [activeCategory, controls]);
-
-  // Set default on initial load
-  useEffect(() => {
-    setActiveCategory('all');
-  }, []);
+  const filteredFeatures = useMemo(
+    () =>
+      activeCategory === 'all'
+        ? ALL_FEATURES
+        : ALL_FEATURES.filter(feature => feature.category === activeCategory),
+    [activeCategory]
+  );
 
   const handleCategoryChange = (categoryId: string) => {
     setActiveCategory(categoryId);
@@ -435,15 +414,17 @@ const AnimatedFeatureTiles: React.FC = () => {
         
         {/* Category Filters + View Toggle */}
         <div className="mb-10 flex flex-wrap justify-between items-center">
-          <div className="flex flex-wrap gap-2 mb-4 sm:mb-0">
-            {categories.map((category, idx) => {
+          <div className="flex flex-wrap gap-2 mb-4 sm:mb-0" role="group" aria-label="Filter features by category">
+            {CATEGORIES.map((category) => {
               const Icon = category.icon;
               const isActive = activeCategory === category.id;
               
               return (
                 <motion.button
                   key={category.id}
+                  type="button"
                   onClick={() => handleCategoryChange(category.id)}
+                  aria-pressed={isActive}
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                   className={`px-4 py-2 rounded-lg flex items-center space-x-2 ${
@@ -452,7 +433,7 @@ const AnimatedFeatureTiles: React.FC = () => {
                       : 'bg-white text-gray-700 hover:bg-gray-50'
                   }`}
                 >
-                  <Icon className="w-4 h-4" />
+                  <Icon className="w-4 h-4" aria-hidden="true" />
                   <span>{category.name}</span>
                 </motion.button>
               );
@@ -461,20 +442,26 @@ const AnimatedFeatureTiles: React.FC = () => {
           
           <div className="flex space-x-2">
             <button
+              type="button"
               onClick={() => setIsGridView(true)}
+              aria-pressed={isGridView}
+              aria-label="Grid view"
               className={`p-2 rounded-lg ${
                 isGridView ? 'bg-[#E44E51]/10 text-[#E44E51]' : 'bg-white text-gray-700'
               }`}
             >
-              <Grid className="w-5 h-5" />
+              <Grid className="w-5 h-5" aria-hidden="true" />
             </button>
             <button
+              type="button"
               onClick={() => setIsGridView(false)}
+              aria-pressed={!isGridView}
+              aria-label="List view"
               className={`p-2 rounded-lg ${
                 !isGridView ? 'bg-[#E44E51]/10 text-[#E44E51]' : 'bg-white text-gray-700'
               }`}
             >
-              <Layout className="w-5 h-5" />
+              <Layout className="w-5 h-5" aria-hidden="true" />
             </button>
           </div>
         </div>
@@ -501,20 +488,31 @@ const AnimatedFeatureTiles: React.FC = () => {
             return (
               <motion.div
                 key={feature.id}
-                custom={idx}
                 initial={{ opacity: 0, y: 30 }}
-                animate={controls}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: Math.min(idx * 0.05, 0.6), duration: 0.5 }}
                 whileHover={{ 
                   y: -10, 
                   boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
                   transition: { duration: 0.3 }
                 }}
-                className={`bg-white rounded-xl shadow-md overflow-hidden border border-gray-100 ${
+                className={`bg-white rounded-xl shadow-md overflow-hidden border border-gray-100 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#E44E51] ${
                   isGridView ? '' : 'md:flex'
                 }`}
+                role="link"
+                tabIndex={0}
+                aria-label={`${feature.title}: ${feature.description}`}
                 onMouseEnter={() => setHoveredTile(feature.id)}
                 onMouseLeave={() => setHoveredTile(null)}
+                onFocus={() => setHoveredTile(feature.id)}
+                onBlur={() => setHoveredTile(null)}
                 onClick={() => handleFeatureClick(feature.link)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    handleFeatureClick(feature.link);
+                  }
+                }}
               >
                 {/* Icon Section */}
                 <div className={`${isGridView ? 'p-6' : 'p-6 md:w-64 flex-shrink-0'}`}>
@@ -523,7 +521,7 @@ const AnimatedFeatureTiles: React.FC = () => {
                       animate={{ rotate: isHovered ? 360 : 0 }}
                       transition={{ duration: 0.8, ease: "easeInOut" }}
                     >
-                      <Icon className="w-8 h-8 text-white" />
+                      <Icon className="w-8 h-8 text-white" aria-hidden="true" />
                     </motion.div>
                   </div>
                   
@@ -568,7 +566,7 @@ const AnimatedFeatureTiles: React.FC = () => {
                               }}
                               className="flex items-start mt-2"
                             >
-                              <svg className="h-5 w-5 text-green-500 mr-2 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <svg aria-hidden="true" focusable="false" className="h-5 w-5 text-green-500 mr-2 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
                               </svg>
                               <span className="text-gray-600 text-sm">{detail}</span>
@@ -586,7 +584,7 @@ const AnimatedFeatureTiles: React.FC = () => {
                             animate={{ x: isHovered ? 5 : 0 }}
                             transition={{ duration: 0.3 }}
                           >
-                            <ArrowRight className="ml-2 w-4 h-4" />
+                            <ArrowRight className="ml-2 w-4 h-4" aria-hidden="true" />
                           </motion.div>
                         </Link>
                       </motion.div>
@@ -598,7 +596,7 @@ const AnimatedFeatureTiles: React.FC = () => {
                         <div className="space-y-2 mb-4">
                           {feature.details.map((detail, index) => (
                             <div key={index} className="flex items-start">
-                              <svg className="h-5 w-5 text-green-500 mr-2 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <svg aria-hidden="true" focusable="false" className="h-5 w-5 text-green-500 mr-2 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
                               </svg>
                               <span className="text-gray-600">{detail}</span>
@@ -612,7 +610,7 @@ const AnimatedFeatureTiles: React.FC = () => {
                           onClick={(e) => e.stopPropagation()}
                         >
                           <span>Learn more</span>
-                          <ArrowRight className="ml-2 w-4 h-4 transition-transform group-hover:translate-x-1" />
+                          <ArrowRight className="ml-2 w-4 h-4 transition-transform group-hover:translate-x-1" aria-hidden="true" />
                         </Link>
                       </div>
                     )}
@@ -636,7 +634,7 @@ const AnimatedFeatureTiles: React.FC = () => {
             className="inline-flex items-center px-6 py-3 text-lg font-semibold rounded-lg bg-[#E44E51] text-white shadow-lg hover:bg-[#D43B3E] transition-colors"
           >
             <span>Try All Features</span>
-            <ChevronRight className="ml-2 w-5 h-5" />
+            <ChevronRight className="ml-2 w-5 h-5" aria-hidden="true" />
           </Link>
           <p className="mt-4 text-gray-500">
             All features are available in our free plan with no credit card required

@@ -1,15 +1,11 @@
 import React, { useState } from 'react';
-import { 
-  ArrowLeftRight, ArrowUpDown, Combine, Divide, Layers, 
-  RotateCcw, Shuffle, Move, Wand2, Palette, Box, Sparkles,
-  Maximize2, Minimize2, Wind, Waves, Zap, Play, Plus
-} from 'lucide-react';
+import { ArrowLeftRight, ArrowUpDown, Combine, Divide, Layers, RotateCcw, Shuffle, Move, type LucideIcon } from 'lucide-react';
 import { Tooltip } from '../ui/Tooltip';
 
 interface TransitionEffect {
   name: string;
   type: string;
-  icon: any;
+  icon: LucideIcon;
   description: string;
 }
 

@@ -1,9 +1,10 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { motion, useScroll, useTransform, useAnimation } from 'framer-motion';
+import { useEffect, useRef, useState } from 'react';
+import { motion, useScroll, useTransform, useAnimation, useReducedMotion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { Play, Camera, Brain, Wand2, Film, Download, Sparkles, Scissors, Type, Clock, Layout, ChevronRight, Layers } from 'lucide-react';
 import { gsap } from 'gsap';
-import lottie from 'lottie-web';
+import { ScrollTrigger } from 'gsap/ScrollTrigger';
+import lottie, { type AnimationItem } from 'lottie-web';
 
 import Navbar from '../components/landing/Navbar';
 import FeatureCard from '../components/landing/FeatureCard';
@@ -19,37 +20,36 @@ import AnimatedFeatureCards from '../components/landing/AnimatedFeatureCards';
 import AnimatedFeatureTiles from '../components/landing/AnimatedFeatureTiles';
 import ComprehensiveFeatureSetExplainer from '../components/landing/ComprehensiveFeatureSetExplainer';
 
+// ScrollTrigger has to be registered before it can be used in a tween
+gsap.registerPlugin(ScrollTrigger);
+
+const HERO_POSTER = 'https://images.unsplash.com/photo-1542744173-8e7e53415bb0?auto=format&fit=crop&w=1280&q=80';
+
 const LandingPage = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const heroRef = useRef<HTMLDivElement>(null);
   const recordingAnimation = useRef<HTMLDivElement>(null);
   const editorAnimation = useRef<HTMLDivElement>(null);
-  const [activeDemo, setActiveDemo] = useState('face-detection');
+  const prefersReducedMotion = useReducedMotion();
+  const [activeDemo] = useState('face-detection');
+  const [videoFailed, setVideoFailed] = useState(false);
   const [animationsLoaded, setAnimationsLoaded] = useState({
     recording: false,
     editor: false
   });
   
   const { scrollYProgress } = useScroll();
-  const y = useTransform(scrollYProgress, [0, 1], ['0%', '100%']);
-  const opacity = useTransform(scrollYProgress, [0, 0.2], [1, 0]);
   const parallaxY = useTransform(scrollYProgress, [0, 1], ['0%', '30%']);
+  const parallaxYSlow = useTransform(scrollYProgress, [0, 1], ['0%', '50%']);
   const heroScale = useTransform(scrollYProgress, [0, 0.5], [1, 0.9]);
   
   // Controls for animations
   const controls = useAnimation();
   
   const handleVideoError = () => {
+    setVideoFailed(true);
     if (videoRef.current) {
-      videoRef.current.poster = 'https://images.unsplash.com/photo-1542744173-8e7e53415bb0?auto=format&fit=crop&w=1280&q=80';
-      
-      const parent = videoRef.current.parentElement;
-      if (parent) {
-        const errorMsg = document.createElement('div');
-        errorMsg.className = 'absolute inset-0 flex items-center justify-center bg-black/40';
-        errorMsg.innerHTML = '<div class="text-white text-center"><Play class="w-10 h-10 mx-auto mb-2 text-white"></Play><p>Video preview</p></div>';
-        parent.appendChild(errorMsg);
-      }
+      videoRef.current.poster = HERO_POSTER;
     }
   };
   
@@ -60,51 +60,52 @@ const LandingPage = () => {
       y: 0,
       transition: { duration: 0.8, staggerChildren: 0.2 }
     });
-    
-    // Initialize animation for the recording animation
-    if (recordingAnimation.current) {
-      try {
-        lottie.loadAnimation({
-          container: recordingAnimation.current,
-          renderer: 'svg',
-          loop: true,
-          autoplay: true,
-          path: 'https://assets10.lottiefiles.com/packages/lf20_zk6kbpdw.json' // Recording animation
-        }).addEventListener('DOMLoaded', () => {
-          setAnimationsLoaded(prev => ({ ...prev, recording: true }));
-        });
-      } catch (error) {
-        console.error("Error loading recording animation:", error);
-        // Show fallback if animation fails to load
-        if (recordingAnimation.current) {
-          recordingAnimation.current.innerHTML = '<div class="flex items-center justify-center h-full"><Camera class="w-16 h-16 text-red-500" /></div>';
-        }
-      }
-    }
-    
-    // Initialize animation for the editor animation
-    if (editorAnimation.current) {
-      try {
-        lottie.loadAnimation({
-          container: editorAnimation.current,
-          renderer: 'svg',
-          loop: true,
-          autoplay: true,
-          path: 'https://assets5.lottiefiles.com/packages/lf20_ydo1amjm.json' // Video editing animation
-        }).addEventListener('DOMLoaded', () => {
-          setAnimationsLoaded(prev => ({ ...prev, editor: true }));
-        });
-      } catch (error) {
-        console.error("Error loading editor animation:", error);
-        // Show fallback if animation fails to load
-        if (editorAnimation.current) {
-          editorAnimation.current.innerHTML = '<div class="flex items-center justify-center h-full"><Scissors class="w-16 h-16 text-blue-500" /></div>';
-        }
-      }
-    }
 
-    // Initialize hero section animation
-    if (heroRef.current) {
+    const lottieInstances: AnimationItem[] = [];
+
+    const loadLottie = (
+      container: HTMLDivElement | null,
+      path: string,
+      key: 'recording' | 'editor'
+    ) => {
+      if (!container) return;
+
+      try {
+        const instance = lottie.loadAnimation({
+          container,
+          renderer: 'svg',
+          loop: true,
+          autoplay: !prefersReducedMotion,
+          path
+        });
+        instance.addEventListener('DOMLoaded', () => {
+          setAnimationsLoaded(prev => ({ ...prev, [key]: true }));
+        });
+        // Keep the icon fallback visible if the animation JSON cannot be fetched
+        instance.addEventListener('data_failed', () => {
+          console.warn(`Failed to load ${key} animation`);
+        });
+        lottieInstances.push(instance);
+      } catch (error) {
+        console.error(`Error loading ${key} animation:`, error);
+      }
+    };
+
+    loadLottie(
+      recordingAnimation.current,
+      'https://assets10.lottiefiles.com/packages/lf20_zk6kbpdw.json',
+      'recording'
+    );
+    loadLottie(
+      editorAnimation.current,
+      'https://assets5.lottiefiles.com/packages/lf20_ydo1amjm.json',
+      'editor'
+    );
+
+    // Initialize hero section animation (skipped when reduced motion is requested)
+    const ctx = gsap.context(() => {
+      if (prefersReducedMotion) return;
+
       gsap.fromTo(
         '.hero-title span', 
         { y: 50, opacity: 0 },
@@ -143,17 +144,22 @@ const LandingPage = () => {
           scrub: true
         }
       });
-    }
+    }, heroRef);
     
     // Autoplay demo video after a delay
-    if (videoRef.current) {
-      setTimeout(() => {
-        videoRef.current?.play().catch(() => {
-          console.log("Autoplay prevented by browser - requiring user interaction");
-        });
-      }, 3000);
-    }
-  }, [controls]);
+    const autoplayTimer = window.setTimeout(() => {
+      if (prefersReducedMotion) return;
+      videoRef.current?.play().catch(() => {
+        console.log("Autoplay prevented by browser - requiring user interaction");
+      });
+    }, 3000);
+
+    return () => {
+      window.clearTimeout(autoplayTimer);
+      ctx.revert();
+      lottieInstances.forEach(instance => instance.destroy());
+    };
+  }, [controls, prefersReducedMotion]);
 
   // Define features
   const features = [
@@ -215,7 +221,7 @@ const LandingPage = () => {
           ></motion.div>
           <motion.div 
             className="absolute -bottom-[40%] left-[35%] w-[70%] h-[70%] rounded-full bg-gradient-to-br from-blue-500/10 to-purple-500/5 blur-3xl transform -rotate-45 parallax-bg-2"
-            style={{ y: useTransform(scrollYProgress, [0, 1], ['0%', '50%']) }}
+            style={{ y: parallaxYSlow }}
           ></motion.div>
         </motion.div>
 
@@ -270,24 +276,42 @@ const LandingPage = () => {
                 ref={videoRef}
                 className="w-full h-full object-cover"
                 src="https://assets.mixkit.co/videos/preview/mixkit-software-developer-working-on-code-screen-close-up-1738-large.mp4"
-                poster="https://images.unsplash.com/photo-1542744173-8e7e53415bb0?auto=format&fit=crop&w=1280&q=80"
+                poster={HERO_POSTER}
                 muted
                 loop
+                playsInline
+                preload="metadata"
                 onError={handleVideoError}
               ></video>
+              {videoFailed && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/40 pointer-events-none">
+                  <div className="text-white text-center">
+                    <Play className="w-10 h-10 mx-auto mb-2 text-white" aria-hidden="true" />
+                    <p>Video preview</p>
+                  </div>
+                </div>
+              )}
               <div className="absolute inset-0 flex items-center justify-center">
-                <motion.div 
-                  className="w-20 h-20 bg-[#E44E51]/90 rounded-full flex items-center justify-center cursor-pointer hover:bg-[#E44E51] transition-colors"
+                <motion.button 
+                  type="button"
+                  aria-label="Play or pause the demo video"
+                  className="w-20 h-20 bg-[#E44E51]/90 rounded-full flex items-center justify-center cursor-pointer hover:bg-[#E44E51] transition-colors focus:outline-none focus:ring-2 focus:ring-white"
                   whileHover={{ scale: 1.1 }}
                   whileTap={{ scale: 0.9 }}
                   onClick={() => {
-                    if (videoRef.current) {
-                      videoRef.current.paused ? videoRef.current.play() : videoRef.current.pause();
+                    const video = videoRef.current;
+                    if (!video) return;
+                    if (video.paused) {
+                      video.play().catch(() => {
+                        console.log('Unable to play the demo video');
+                      });
+                    } else {
+                      video.pause();
                     }
                   }}
                 >
-                  <Play className="w-10 h-10 text-white" />
-                </motion.div>
+                  <Play className="w-10 h-10 text-white" aria-hidden="true" />
+                </motion.button>
               </div>
             </motion.div>
             
@@ -297,13 +321,14 @@ const LandingPage = () => {
               initial={{ opacity: 0, scale: 0 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ duration: 1, delay: 2.5 }}
+              aria-hidden="true"
             >
-              {!animationsLoaded.recording ? (
-                <div className="w-full h-full rounded-full bg-[#E44E51]/10 flex items-center justify-center">
+              {/* The lottie container must always be mounted so the ref exists */}
+              <div ref={recordingAnimation} className="w-full h-full"></div>
+              {!animationsLoaded.recording && (
+                <div className="absolute inset-0 rounded-full bg-[#E44E51]/10 flex items-center justify-center">
                   <Camera className="w-12 h-12 text-[#E44E51]" />
                 </div>
-              ) : (
-                <div ref={recordingAnimation} className="w-full h-full"></div>
               )}
             </motion.div>
             
@@ -313,13 +338,13 @@ const LandingPage = () => {
               initial={{ opacity: 0, scale: 0 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ duration: 1, delay: 2.8 }}
+              aria-hidden="true"
             >
-              {!animationsLoaded.editor ? (
-                <div className="w-full h-full rounded-full bg-blue-500/10 flex items-center justify-center">
+              <div ref={editorAnimation} className="w-full h-full"></div>
+              {!animationsLoaded.editor && (
+                <div className="absolute inset-0 rounded-full bg-blue-500/10 flex items-center justify-center">
                   <Scissors className="w-12 h-12 text-blue-500" />
                 </div>
-              ) : (
-                <div ref={editorAnimation} className="w-full h-full"></div>
               )}
             </motion.div>
             
@@ -634,9 +659,13 @@ const LandingPage = () => {
               >
                 <img 
                   src={demo.thumbnail} 
-                  alt={demo.title}
+                  alt={`${demo.title} thumbnail`}
+                  loading="lazy"
                   className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                   onError={(e) => {
+                    // Guard against an infinite error loop if the fallback also fails
+                    if (e.currentTarget.dataset.fallbackApplied) return;
+                    e.currentTarget.dataset.fallbackApplied = 'true';
                     e.currentTarget.src = 'https://images.unsplash.com/photo-1581472723648-909f4851d4ae?auto=format&fit=crop&w=1000&q=80';
                     e.currentTarget.alt = 'Demo preview';
                   }}

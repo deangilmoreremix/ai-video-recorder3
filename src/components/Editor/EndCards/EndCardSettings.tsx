@@ -1,7 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Trash2, ExternalLink, Layers, Wand2 } from 'lucide-react';
-import { Tooltip } from '../../ui/Tooltip';
+import { Trash2 } from 'lucide-react';
 import type { EndCard } from './types';
 
 interface EndCardSettingsProps {
@@ -12,7 +11,6 @@ interface EndCardSettingsProps {
 
 export const EndCardSettings: React.FC<EndCardSettingsProps> = ({
   card,
-  onUpdate,
   onRemove
 }) => {
   return (

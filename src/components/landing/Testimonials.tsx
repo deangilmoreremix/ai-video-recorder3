@@ -1,4 +1,3 @@
-import React from 'react';
 import { motion } from 'framer-motion';
 
 const Testimonials = () => {
@@ -45,7 +44,7 @@ const Testimonials = () => {
               transition={{ duration: 0.5, delay: index * 0.1 }}
             >
               <div className="flex-shrink-0 mb-6">
-                <svg className="h-10 w-10 text-[#E44E51]" fill="currentColor" viewBox="0 0 24 24">
+                <svg aria-hidden="true" focusable="false" className="h-10 w-10 text-[#E44E51]" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M14.017 18L14.017 10.609C14.017 4.905 17.748 1.039 23 0L23.995 2.151C21.563 3.068 20 5.789 20 8H24V18H14.017ZM0 18V10.609C0 4.905 3.748 1.038 9 0L9.996 2.151C7.563 3.068 6 5.789 6 8H9.983L9.983 18L0 18Z" />
                 </svg>
               </div>
@@ -53,8 +52,9 @@ const Testimonials = () => {
               <div className="flex items-center">
                 <img 
                   src={testimonial.avatar} 
-                  alt={testimonial.author}
-                  className="h-12 w-12 rounded-full mr-4 object-cover"
+                  alt={`${testimonial.author}, ${testimonial.role}`}
+                  loading="lazy"
+                  className="h-12 w-12 rounded-full mr-4 object-cover bg-gray-100"
                 />
                 <div>
                   <p className="font-semibold text-gray-900">{testimonial.author}</p>

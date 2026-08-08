@@ -1,20 +1,61 @@
 import { create } from 'zustand';
+import type { Project } from '../types';
+
+export interface VideoEffectSettings {
+  brightness: number;
+  contrast: number;
+  saturation: number;
+  blur: number;
+  sharpness: number;
+  temperature: number;
+  vignette: number;
+  grain: number;
+  hue: number;
+  sepia: number;
+  noise: number;
+  bloom: number;
+  clarity: number;
+  vibrance: number;
+  exposure: number;
+  gamma: number;
+  highlights: number;
+  shadows: number;
+  whites: number;
+  blacks: number;
+}
+
+export type VideoEffectParam = keyof VideoEffectSettings;
+
+export const defaultVideoEffects: VideoEffectSettings = {
+  brightness: 1,
+  contrast: 1,
+  saturation: 1,
+  blur: 0,
+  sharpness: 1,
+  temperature: 1,
+  vignette: 0,
+  grain: 0,
+  hue: 0,
+  sepia: 0,
+  noise: 0,
+  bloom: 0,
+  clarity: 1,
+  vibrance: 1,
+  exposure: 0,
+  gamma: 1,
+  highlights: 0,
+  shadows: 0,
+  whites: 0,
+  blacks: 0
+};
 
 interface EditorState {
+  currentProject: Project | null;
   currentTime: number;
   duration: number;
   isPlaying: boolean;
   volume: number;
-  videoEffects: {
-    brightness: number;
-    contrast: number;
-    saturation: number;
-    blur: number;
-    sharpness: number;
-    temperature: number;
-    vignette: number;
-    grain: number;
-  };
+  videoEffects: VideoEffectSettings;
   aiSettings: {
     faceDetection: boolean;
     beautification: boolean;
@@ -53,6 +94,8 @@ interface EditorState {
   updateAISettings: (settings: Partial<EditorState['aiSettings']>) => void;
   updateAudioSettings: (settings: Partial<EditorState['audioSettings']>) => void;
   updateAdvancedFeatures: (features: Partial<EditorState['advancedFeatures']>) => void;
+  resetVideoEffects: () => void;
+  setCurrentProject: (project: Project | null) => void;
   setCurrentTime: (time: number) => void;
   setDuration: (duration: number) => void;
   setIsPlaying: (isPlaying: boolean) => void;
@@ -60,20 +103,12 @@ interface EditorState {
 }
 
 export const useEditorStore = create<EditorState>((set) => ({
+  currentProject: null,
   currentTime: 0,
   duration: 0,
   isPlaying: false,
   volume: 1,
-  videoEffects: {
-    brightness: 1,
-    contrast: 1,
-    saturation: 1,
-    blur: 0,
-    sharpness: 1,
-    temperature: 1,
-    vignette: 0,
-    grain: 0
-  },
+  videoEffects: { ...defaultVideoEffects },
   aiSettings: {
     faceDetection: false,
     beautification: false,
@@ -124,6 +159,8 @@ export const useEditorStore = create<EditorState>((set) => ({
     set((state) => ({
       advancedFeatures: { ...state.advancedFeatures, ...features }
     })),
+  resetVideoEffects: () => set({ videoEffects: { ...defaultVideoEffects } }),
+  setCurrentProject: (project) => set({ currentProject: project }),
   setCurrentTime: (time) => set({ currentTime: time }),
   setDuration: (duration) => set({ duration }),
   setIsPlaying: (isPlaying) => set({ isPlaying }),

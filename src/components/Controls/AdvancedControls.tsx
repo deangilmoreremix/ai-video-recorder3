@@ -1,13 +1,35 @@
 import React, { useState } from 'react';
-import { Settings, Video, Mic, Volume2, Sliders, Camera, Monitor, Layout } from 'lucide-react';
-import { Tooltip } from '../ui/Tooltip';
+import { Video, Mic } from 'lucide-react';
+
+interface RecordingSettings {
+  video: {
+    enabled: boolean;
+    device: string;
+    resolution: string;
+    frameRate: number;
+    quality: string;
+  };
+  audio: {
+    enabled: boolean;
+    device: string;
+    noiseSuppression: boolean;
+    echoCancellation: boolean;
+    autoGainControl: boolean;
+  };
+  recording: {
+    mode: string;
+    format: string;
+    quality: string;
+    maxDuration: number;
+  };
+}
 
 interface AdvancedControlsProps {
-  onSettingsChange?: (settings: any) => void;
+  onSettingsChange?: (settings: RecordingSettings) => void;
 }
 
 export const AdvancedControls: React.FC<AdvancedControlsProps> = ({ onSettingsChange }) => {
-  const [settings, setSettings] = useState({
+  const [settings, setSettings] = useState<RecordingSettings>({
     video: {
       enabled: true,
       device: 'default',
@@ -30,14 +52,18 @@ export const AdvancedControls: React.FC<AdvancedControlsProps> = ({ onSettingsCh
     }
   });
 
-  const handleSettingChange = (category: string, setting: string, value: any) => {
+  const handleSettingChange = (
+    category: keyof typeof settings,
+    setting: string,
+    value: boolean | string | number
+  ) => {
     const newSettings = {
       ...settings,
       [category]: {
         ...settings[category],
         [setting]: value
       }
-    };
+    } as typeof settings;
     setSettings(newSettings);
     onSettingsChange?.(newSettings);
   };

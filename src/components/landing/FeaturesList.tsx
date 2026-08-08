@@ -1,11 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import {
-  Camera, Brain, Scissors, Type, Clock, Layout, Film, Download, Sparkles,
-  Wand2, Layers, Mic, Volume2, Palette, Gauge, Smile, HandMetal,
-  Maximize2, Send, Trash2, Focus, Monitor, Grid, Sliders, Zap,
-  Video, ChevronRight, Scan, Share2, Image
-} from 'lucide-react';
+import { Camera, Brain, Scissors, Type, Clock, Layout, Film, Download, Sparkles, Wand2, Layers, Mic, Volume2, Palette, Gauge, Smile, HandMetal, Send, Trash2, Focus, Monitor, Grid, Sliders, Zap, Video, ChevronRight, Scan, Share2, Image } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 interface Feature {
@@ -282,14 +277,17 @@ const FeaturesList: React.FC = () => {
             
             return (
               <div key={category.id} className="space-y-6">
-                <motion.div 
-                  className="flex items-center space-x-4 cursor-pointer"
+                <motion.button 
+                  type="button"
+                  className="flex items-center space-x-4 text-left w-full sm:w-auto rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-[#E44E51]"
                   onClick={() => toggleCategory(category.id)}
+                  aria-expanded={isExpanded}
+                  aria-controls={`features-${category.id}`}
                   whileHover={{ x: 5 }}
                   transition={{ type: 'spring', stiffness: 300, damping: 20 }}
                 >
                   <div className="w-14 h-14 rounded-full bg-[#E44E51]/10 flex items-center justify-center">
-                    <CategoryIcon className="h-7 w-7 text-[#E44E51]" />
+                    <CategoryIcon className="h-7 w-7 text-[#E44E51]" aria-hidden="true" />
                   </div>
                   <div>
                     <h3 className="text-2xl font-bold text-gray-900">{category.title}</h3>
@@ -298,13 +296,15 @@ const FeaturesList: React.FC = () => {
                         {isExpanded ? "Hide features" : `View all ${categoryFeatures.length} features`}
                       </span>
                       <ChevronRight 
+                        aria-hidden="true"
                         className={`w-4 h-4 ml-1 text-[#E44E51] transition-transform ${isExpanded ? 'rotate-90' : ''}`}
                       />
                     </div>
                   </div>
-                </motion.div>
+                </motion.button>
                 
                 <motion.div
+                  id={`features-${category.id}`}
                   initial={false}
                   animate={{ 
                     height: isExpanded ? 'auto' : 0,
@@ -330,8 +330,8 @@ const FeaturesList: React.FC = () => {
                             variants={itemVariants}
                             whileHover={{ y: -5, boxShadow: '0px 10px 20px rgba(0, 0, 0, 0.05)' }}
                           >
-                            <div className={`w-10 h-10 rounded-full bg-[#E44E51]/10 flex items-center justify-center mb-4`}>
-                              <FeatureIcon className="w-5 h-5 text-[#E44E51]" />
+                            <div className="w-10 h-10 rounded-full bg-[#E44E51]/10 flex items-center justify-center mb-4">
+                              <FeatureIcon className="w-5 h-5 text-[#E44E51]" aria-hidden="true" />
                             </div>
                             <h3 className="text-lg font-semibold text-gray-900 mb-2">{feature.title}</h3>
                             <p className="text-sm text-gray-600">{feature.description}</p>
@@ -347,7 +347,7 @@ const FeaturesList: React.FC = () => {
                   className="inline-flex items-center text-[#E44E51] font-medium hover:underline mt-2"
                 >
                   <span>Explore all {category.title.toLowerCase()}</span>
-                  <ChevronRight className="w-4 h-4 ml-1" />
+                  <ChevronRight className="w-4 h-4 ml-1" aria-hidden="true" />
                 </Link>
               </div>
             );

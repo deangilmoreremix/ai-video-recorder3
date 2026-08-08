@@ -1,13 +1,16 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Video, Search, Filter, Clock, Calendar, Trash2, Edit2, Download, 
-  Play, Grid, List, ChevronDown, MoreHorizontal, Star, StarOff, 
-  Copy, Share2, Folder, Plus, Film, ArrowUp, ArrowDown, Eye, Settings,
-  X, ArrowLeft, ArrowRight, Loader
-} from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Search, Filter, Clock, Calendar, Trash2, Edit2, Download, Play, Grid, List, ChevronDown, MoreHorizontal, Star, StarOff, Folder, Plus, Film, ArrowUp, ArrowDown, X, ArrowLeft, ArrowRight, Loader } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Tooltip } from '../ui/Tooltip';
-import { getRecordings, updateRecording, deleteRecording, getFolders, Recording } from '../../utils/supabaseClient';
+import {
+  getRecordings,
+  updateRecording,
+  deleteRecording,
+  getFolders,
+  isSafeMediaUrl,
+  isSupabaseConfigured,
+  Recording
+} from '../../utils/supabaseClient';
 
 interface RecordingsLibraryProps {
   onBackToRecorder: () => void;
@@ -35,6 +38,7 @@ const RecordingsLibrary: React.FC<RecordingsLibraryProps> = ({
   const [selectedFormat, setSelectedFormat] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
+  const [actionError, setActionError] = useState<string | null>(null);
   const recordingsPerPage = 6;
   
   // Fetch recordings from database
@@ -51,6 +55,7 @@ const RecordingsLibrary: React.FC<RecordingsLibraryProps> = ({
         setFolders(foldersData);
       } catch (error) {
         console.error('Error fetching data:', error);
+        setActionError('We could not load your recordings. Please try again.');
       } finally {
         setIsLoading(false);
       }
@@ -121,43 +126,55 @@ const RecordingsLibrary: React.FC<RecordingsLibraryProps> = ({
     if (!recording) return;
 
     // Toggle favorite status
-    const success = await updateRecording(id, { favorite: !recording.favorite });
-    
-    if (success) {
-      // Update local state
-      setRecordings(recordings.map(rec => 
-        rec.id === id ? { ...rec, favorite: !rec.favorite } : rec
-      ));
+    const { error } = await updateRecording(id, { favorite: !recording.favorite });
+
+    if (error) {
+      setActionError(error);
+      return;
     }
+
+    // Update local state
+    setActionError(null);
+    setRecordings(recordings.map(rec => 
+      rec.id === id ? { ...rec, favorite: !rec.favorite } : rec
+    ));
   };
 
   const deleteRecordingHandler = async (id: string) => {
     if (window.confirm('Are you sure you want to delete this recording?')) {
-      const success = await deleteRecording(id);
-      
-      if (success) {
-        // Update local state
-        setRecordings(recordings.filter(rec => rec.id !== id));
-        if (selectedRecording === id) {
-          setSelectedRecording(null);
-        }
-        if (playingRecording === id) {
-          setPlayingRecording(null);
-          setPreviewUrl(null);
-        }
+      const { error } = await deleteRecording(id);
+
+      if (error) {
+        setActionError(error);
+        return;
+      }
+
+      // Update local state
+      setActionError(null);
+      setRecordings(recordings.filter(rec => rec.id !== id));
+      if (selectedRecording === id) {
+        setSelectedRecording(null);
+      }
+      if (playingRecording === id) {
+        setPlayingRecording(null);
+        setPreviewUrl(null);
       }
     }
   };
 
   const assignToFolder = async (id: string, folder: string | null) => {
-    const success = await updateRecording(id, { folder });
-    
-    if (success) {
-      // Update local state
-      setRecordings(recordings.map(rec => 
-        rec.id === id ? { ...rec, folder } : rec
-      ));
+    const { error } = await updateRecording(id, { folder });
+
+    if (error) {
+      setActionError(error);
+      return;
     }
+
+    // Update local state
+    setActionError(null);
+    setRecordings(recordings.map(rec => 
+      rec.id === id ? { ...rec, folder } : rec
+    ));
   };
 
   const toggleSort = (sort: 'date' | 'title' | 'duration' | 'size') => {
@@ -205,10 +222,16 @@ const RecordingsLibrary: React.FC<RecordingsLibraryProps> = ({
 
   const playRecording = (id: string) => {
     const recording = recordings.find(rec => rec.id === id);
-    if (recording) {
-      setPlayingRecording(id);
-      setPreviewUrl(recording.url);
+    if (!recording) return;
+
+    if (!isSafeMediaUrl(recording.url)) {
+      setActionError('This recording does not have a playable video URL.');
+      return;
     }
+
+    setActionError(null);
+    setPlayingRecording(id);
+    setPreviewUrl(recording.url);
   };
 
   const addNewFolder = async () => {
@@ -223,7 +246,7 @@ const RecordingsLibrary: React.FC<RecordingsLibraryProps> = ({
     if (!selectedRecording) return;
     
     const recording = recordings.find(rec => rec.id === selectedRecording);
-    if (recording && recording.url) {
+    if (recording && isSafeMediaUrl(recording.url)) {
       // Create a download link
       const a = document.createElement('a');
       a.href = recording.url;
@@ -231,6 +254,8 @@ const RecordingsLibrary: React.FC<RecordingsLibraryProps> = ({
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
+    } else {
+      setActionError('This recording does not have a downloadable video URL.');
     }
   };
 
@@ -486,6 +511,29 @@ const RecordingsLibrary: React.FC<RecordingsLibraryProps> = ({
           </button>
           <ChevronDown className="w-4 h-4 mx-2" />
           <span className="font-medium text-[#E44E51]">{selectedFolder}</span>
+        </div>
+      )}
+
+      {/* Connection / action feedback */}
+      {!isSupabaseConfigured && (
+        <div className="mb-4 px-4 py-3 rounded-lg bg-amber-50 text-amber-800 text-sm">
+          Cloud storage is not connected, so recordings cannot be loaded or saved.
+        </div>
+      )}
+
+      {actionError && (
+        <div
+          role="alert"
+          className="mb-4 px-4 py-3 rounded-lg bg-[#E44E51]/10 text-[#E44E51] text-sm flex justify-between items-start"
+        >
+          <span>{actionError}</span>
+          <button
+            onClick={() => setActionError(null)}
+            aria-label="Dismiss message"
+            className="ml-4 p-1 rounded-full hover:bg-[#E44E51]/10"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
       )}
 
@@ -757,12 +805,24 @@ const RecordingsLibrary: React.FC<RecordingsLibraryProps> = ({
                   {recordings.find(r => r.id === selectedRecording)?.title}
                 </h3>
                 <div className="hidden sm:flex text-sm text-gray-500">
-                  <span className="mr-4">{formatDuration(recordings.find(r => r.id === selectedRecording)?.duration)}</span>
-                  <span>{formatSize(recordings.find(r => r.id === selectedRecording)?.size)}</span>
+                  <span className="mr-4">{formatDuration(recordings.find(r => r.id === selectedRecording)?.duration ?? null)}</span>
+                  <span>{formatSize(recordings.find(r => r.id === selectedRecording)?.size ?? null)}</span>
                 </div>
               </div>
               
               <div className="flex space-x-3">
+                <label className="sr-only" htmlFor="recording-folder">Move to folder</label>
+                <select
+                  id="recording-folder"
+                  value={recordings.find(r => r.id === selectedRecording)?.folder ?? ''}
+                  onChange={(e) => assignToFolder(selectedRecording, e.target.value || null)}
+                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+                >
+                  <option value="">Uncategorized</option>
+                  {folders.map(folder => (
+                    <option key={folder} value={folder}>{folder}</option>
+                  ))}
+                </select>
                 <button 
                   className="px-4 py-2 bg-gray-100 text-gray-800 rounded-lg hover:bg-gray-200 flex items-center"
                   onClick={() => setSelectedRecording(null)}

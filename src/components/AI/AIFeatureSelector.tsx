@@ -1,11 +1,5 @@
 import React, { useState } from 'react';
-import { 
-  Brain, Sparkles, Layout, Focus, CloudFog, Zap, 
-  Wind, Palette, Gauge, Eye, Scan, Settings, X, 
-  Camera, Layers, Send, Smile, ArrowUp, Filter, 
-  Mic, Monitor, Trash, HandMetal, Maximize, Film,
-  Lightbulb, Video, AlertCircle, Vibrate, Wand2
-} from 'lucide-react';
+import { Brain, Sparkles, Layout, Focus, Wind, Palette, Gauge, Scan, X, Camera, Layers, Send, Smile, ArrowUp, Filter, Mic, Monitor, Trash, HandMetal, Maximize, Film, Lightbulb, AlertCircle, Wand2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Tooltip } from '../ui/Tooltip';
 
@@ -37,14 +31,12 @@ const DEFAULT_FEATURE_ICONS = {
 interface AIFeatureSelectorProps {
   onFeatureSelect: (feature: string) => void;
   activeFeature: string | null;
-  videoRef: React.RefObject<HTMLVideoElement>;
   featureIcons?: Record<string, React.ElementType>;
 }
 
 export const AIFeatureSelector: React.FC<AIFeatureSelectorProps> = ({
   onFeatureSelect,
   activeFeature,
-  videoRef,
   featureIcons = {}
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);

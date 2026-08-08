@@ -1,16 +1,71 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { motion } from 'framer-motion';
-import { 
-  Camera, Scan, HandMetal, Layers, Trash2, Sparkles, Focus, 
-  Sliders, Plus, Minus, Play, Pause
-} from 'lucide-react';
+import { motion, useReducedMotion } from 'framer-motion';
+import { Camera, Scan, Layers, Trash2, Sparkles, Plus, Minus, Play, Pause } from 'lucide-react';
 
 interface InteractiveFeatureDemoProps {
   initialFeature?: string;
 }
 
+interface DemoFeature {
+  id: string;
+  name: string;
+  icon: React.ElementType;
+  videoUrl: string;
+  fallbackImage: string;
+  description: string;
+}
+
+// Features data with reliable video URLs and fallback images
+const FEATURES: DemoFeature[] = [
+  {
+    id: 'face-detection',
+    name: 'Face Detection',
+    icon: Camera,
+    videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-talking-on-the-phone-4990-large.mp4',
+    fallbackImage: 'https://images.pexels.com/photos/1124589/pexels-photo-1124589.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1',
+    description: 'Detect and track faces in real-time with precision'
+  },
+  {
+    id: 'facial-landmarks',
+    name: 'Facial Landmarks',
+    icon: Scan,
+    videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-talking-by-a-dark-wall-1434-large.mp4',
+    fallbackImage: 'https://images.pexels.com/photos/2726111/pexels-photo-2726111.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1',
+    description: 'Track 468 facial points for advanced effects'
+  },
+  {
+    id: 'background-removal',
+    name: 'Background Removal',
+    icon: Trash2,
+    videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-walking-in-the-street-with-a-jacket-45665-large.mp4',
+    fallbackImage: 'https://images.pexels.com/photos/1382731/pexels-photo-1382731.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1',
+    description: 'Remove background without a green screen'
+  },
+  {
+    id: 'background-blur',
+    name: 'Background Blur',
+    icon: Layers,
+    videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-man-dancing-under-changing-lights-32976-large.mp4',
+    fallbackImage: 'https://images.pexels.com/photos/2050994/pexels-photo-2050994.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1',
+    description: 'Apply professional blur effect to background'
+  },
+  {
+    id: 'beautification',
+    name: 'Beautification',
+    icon: Sparkles,
+    videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-portrait-of-a-young-model-posing-for-a-shoot-39883-large.mp4',
+    fallbackImage: 'https://images.pexels.com/photos/774909/pexels-photo-774909.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1',
+    description: 'Enhance appearance with AI-powered filters'
+  }
+];
+
+const VIDEO_LOAD_TIMEOUT = 10000;
+
 const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initialFeature = 'face-detection' }) => {
-  const [activeFeature, setActiveFeature] = useState(initialFeature);
+  const prefersReducedMotion = useReducedMotion();
+  const [activeFeature, setActiveFeature] = useState(
+    () => (FEATURES.some(f => f.id === initialFeature) ? initialFeature : FEATURES[0].id)
+  );
   const [isPlaying, setIsPlaying] = useState(true);
   const [intensity, setIntensity] = useState(50);
   const [videoLoaded, setVideoLoaded] = useState(false);
@@ -20,73 +75,44 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationFrameRef = useRef<number>();
   const loadingTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
-  
-  // Features data with reliable video URLs and fallback images
-  const features = [
-    {
-      id: 'face-detection',
-      name: 'Face Detection',
-      icon: Camera,
-      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-talking-on-the-phone-4990-large.mp4',
-      fallbackImage: 'https://images.pexels.com/photos/1124589/pexels-photo-1124589.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1',
-      description: 'Detect and track faces in real-time with precision'
-    },
-    {
-      id: 'facial-landmarks',
-      name: 'Facial Landmarks',
-      icon: Scan,
-      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-talking-by-a-dark-wall-1434-large.mp4',
-      fallbackImage: 'https://images.pexels.com/photos/2726111/pexels-photo-2726111.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1',
-      description: 'Track 468 facial points for advanced effects'
-    },
-    {
-      id: 'background-removal',
-      name: 'Background Removal',
-      icon: Trash2,
-      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-walking-in-the-street-with-a-jacket-45665-large.mp4',
-      fallbackImage: 'https://images.pexels.com/photos/1382731/pexels-photo-1382731.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1',
-      description: 'Remove background without a green screen'
-    },
-    {
-      id: 'background-blur',
-      name: 'Background Blur',
-      icon: Layers,
-      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-man-dancing-under-changing-lights-32976-large.mp4',
-      fallbackImage: 'https://images.pexels.com/photos/2050994/pexels-photo-2050994.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1',
-      description: 'Apply professional blur effect to background'
-    },
-    {
-      id: 'beautification',
-      name: 'Beautification',
-      icon: Sparkles,
-      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-portrait-of-a-young-model-posing-for-a-shoot-39883-large.mp4',
-      fallbackImage: 'https://images.pexels.com/photos/774909/pexels-photo-774909.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1',
-      description: 'Enhance appearance with AI-powered filters'
-    }
-  ];
-  
-  // Get current feature data
-  const currentFeature = features.find(f => f.id === activeFeature) || features[0];
+
+  // The rAF loop keeps a single closure alive, so the values it reads have to
+  // live in refs - otherwise the slider/fallback state would never update.
+  const intensityRef = useRef(intensity);
+  const videoErrorRef = useRef(videoError);
+  const videoLoadedRef = useRef(videoLoaded);
+
+  useEffect(() => {
+    intensityRef.current = intensity;
+  }, [intensity]);
+
+  useEffect(() => {
+    videoErrorRef.current = videoError;
+  }, [videoError]);
+
+  useEffect(() => {
+    videoLoadedRef.current = videoLoaded;
+  }, [videoLoaded]);
+
+  // Do not auto-play the demo for users who asked for reduced motion
+  useEffect(() => {
+    if (prefersReducedMotion) setIsPlaying(false);
+  }, [prefersReducedMotion]);
+
+  // Get current feature data (always defined - falls back to the first entry)
+  const currentFeature = FEATURES.find(f => f.id === activeFeature) || FEATURES[0];
   
   // Handle feature change
   useEffect(() => {
     // Reset state
     setVideoLoaded(false);
     setVideoError(false);
+    videoLoadedRef.current = false;
+    videoErrorRef.current = false;
     
     // Clear any existing animations and timeouts
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-      animationFrameRef.current = undefined;
-    }
-    
-    if (loadingTimeoutRef.current) {
-      clearTimeout(loadingTimeoutRef.current);
-      loadingTimeoutRef.current = undefined;
-    }
-    
-    // Remove any existing overlays
-    cleanupOverlays();
+    stopAnimation();
+    clearLoadingTimeout();
     
     // Set up canvas to match container size
     setupCanvas();
@@ -96,83 +122,99 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
     
     // Start animation if playing
     if (isPlaying) {
-      animateEffect();
+      startAnimation();
     }
     
     return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-      }
-      if (loadingTimeoutRef.current) {
-        clearTimeout(loadingTimeoutRef.current);
-      }
-      cleanupOverlays();
+      stopAnimation();
+      clearLoadingTimeout();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeFeature]);
+
+  // Keep the canvas backing store in sync with its rendered size
+  useEffect(() => {
+    const handleResize = () => setupCanvas();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
   
   // Handle play state changes
   useEffect(() => {
-    if (!videoRef.current) return;
+    const video = videoRef.current;
+    if (!video) return;
     
-    if (isPlaying && videoLoaded && !videoError) {
-      videoRef.current.play().catch(err => {
-        console.warn("Autoplay prevented:", err);
-      });
-      animateEffect();
-    } else {
-      videoRef.current.pause();
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-        animationFrameRef.current = undefined;
+    if (isPlaying) {
+      if (videoLoaded && !videoError) {
+        video.play().catch(err => {
+          console.warn("Autoplay prevented:", err);
+        });
+      } else {
+        video.pause();
       }
+      // The canvas overlay keeps animating even when only the static
+      // fallback is available.
+      startAnimation();
+    } else {
+      video.pause();
+      stopAnimation();
     }
     
     return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-      }
+      stopAnimation();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPlaying, videoLoaded, videoError]);
-  
-  // Clean up any overlay elements
-  const cleanupOverlays = () => {
-    if (!videoRef.current) return;
-    
-    const parent = videoRef.current.parentElement;
-    if (parent) {
-      // Find and remove any overlays
-      const overlays = parent.querySelectorAll('.feature-overlay');
-      overlays.forEach(overlay => {
-        parent.removeChild(overlay);
-      });
+
+  const clearLoadingTimeout = () => {
+    if (loadingTimeoutRef.current !== undefined) {
+      clearTimeout(loadingTimeoutRef.current);
+      loadingTimeoutRef.current = undefined;
     }
+  };
+
+  // Cancelling the pending frame also terminates the self-scheduling loop,
+  // which prevents duplicated rAF loops from piling up.
+  const stopAnimation = () => {
+    if (animationFrameRef.current !== undefined) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = undefined;
+    }
+  };
+
+  const startAnimation = () => {
+    stopAnimation();
+    animationFrameRef.current = requestAnimationFrame(animateEffect);
   };
   
   // Load video with robust error handling
   const loadVideo = () => {
-    if (!videoRef.current || !currentFeature) return;
-    
     const video = videoRef.current;
+    if (!video) return;
     
-    // Reset video state and show the element
+    // Reset video state
     video.pause();
     video.removeAttribute('src');
     video.load();
-    video.style.display = 'block';
     
     // Set poster image as fallback
     video.poster = currentFeature.fallbackImage;
     
     // Prepare error handler
     const handleVideoError = () => {
-      console.log('Video failed to load, using fallback image');
+      clearLoadingTimeout();
+      console.warn('Video failed to load, using fallback image');
+      videoErrorRef.current = true;
+      videoLoadedRef.current = false;
       setVideoError(true);
       setVideoLoaded(false);
-      showFallbackImage();
     };
     
     // Set up load handler
     const handleVideoLoaded = () => {
+      clearLoadingTimeout();
+      videoLoadedRef.current = true;
+      videoErrorRef.current = false;
       setVideoLoaded(true);
       setVideoError(false);
       
@@ -182,10 +224,6 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
         });
       }
     };
-    
-    // Clear previous event listeners
-    video.onloadeddata = null;
-    video.onerror = null;
     
     // Add event listeners
     video.addEventListener('loadeddata', handleVideoLoaded, { once: true });
@@ -198,92 +236,25 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
       
       // Set timeout in case video takes too long to load
       loadingTimeoutRef.current = setTimeout(() => {
-        if (!videoLoaded && !videoError) {
+        if (!videoLoadedRef.current && !videoErrorRef.current) {
           console.warn("Video load timeout");
           handleVideoError();
         }
-      }, 10000); // 10 second timeout
+      }, VIDEO_LOAD_TIMEOUT);
     } catch (err) {
       console.error("Error setting video source:", err);
       handleVideoError();
     }
   };
   
-  // Show fallback image when video fails to load
-  const showFallbackImage = () => {
-    if (!videoRef.current || !currentFeature) return;
-    
-    const video = videoRef.current;
-    video.style.display = 'none';
-    
-    // Find parent element
-    const parent = video.parentElement;
-    if (!parent) return;
-    
-    // Check if we already have a fallback element
-    let fallback = parent.querySelector('.feature-overlay') as HTMLElement;
-    if (fallback) {
-      // Update existing fallback
-      fallback.style.backgroundImage = `url(${currentFeature.fallbackImage})`;
-      return;
-    }
-    
-    // Create fallback element
-    fallback = document.createElement('div');
-    fallback.className = 'feature-overlay absolute inset-0 bg-cover bg-center';
-    fallback.style.backgroundImage = `url(${currentFeature.fallbackImage})`;
-    
-    // Add a darkening overlay for text visibility
-    const overlay = document.createElement('div');
-    overlay.className = 'absolute inset-0 bg-black bg-opacity-30 flex flex-col items-center justify-center text-white';
-    
-    // Icon element
-    const IconComponent = currentFeature.icon;
-    const iconEl = document.createElement('div');
-    iconEl.className = 'w-16 h-16 mb-4 rounded-full bg-white/10 flex items-center justify-center';
-    iconEl.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24"><path d="${getIconPath(currentFeature.icon)}"></path></svg>`;
-    
-    // Text elements
-    const titleEl = document.createElement('div');
-    titleEl.className = 'text-xl font-bold mb-1';
-    titleEl.textContent = currentFeature.name;
-    
-    const descEl = document.createElement('div');
-    descEl.className = 'text-sm text-white/80 text-center max-w-xs px-4';
-    descEl.textContent = "Static preview - interactive effects will be shown on this canvas";
-    
-    overlay.appendChild(iconEl);
-    overlay.appendChild(titleEl);
-    overlay.appendChild(descEl);
-    fallback.appendChild(overlay);
-    parent.appendChild(fallback);
-  };
-  
-  // Helper to get SVG path for different icons
-  const getIconPath = (Icon: React.ElementType): string => {
-    if (Icon === Camera) {
-      return "M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z M12 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6z";
-    } else if (Icon === Scan) {
-      return "M21 12V7.5a2.5 2.5 0 0 0-2.5-2.5H16 M3 12v4.5A2.5 2.5 0 0 0 5.5 19H9 M3 12V7.5A2.5 2.5 0 0 1 5.5 5H9 M21 12v4.5a2.5 2.5 0 0 1-2.5 2.5H16";
-    } else if (Icon === Trash2) {
-      return "M3 6h18 M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2";
-    } else if (Icon === Layers) {
-      return "M12 2L2 7l10 5 10-5-10-5z M2 17l10 5 10-5 M2 12l10 5 10-5";
-    } else if (Icon === Sparkles) {
-      return "m12 3-1.9 5.7a2 2 0 0 1-1.3 1.3L3 12l5.7 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.7a2 2 0 0 1 1.3-1.3L21 12l-5.7-1.9a2 2 0 0 1-1.3-1.3L12 3Z";
-    }
-    return "";
-  };
-  
   // Set up canvas for drawing
   const setupCanvas = () => {
-    if (!canvasRef.current) return;
-    
     const canvas = canvasRef.current;
+    if (!canvas) return;
     
     // Get the dimensions from the parent element to ensure proper scaling
     const parent = canvas.parentElement;
-    if (parent) {
+    if (parent && parent.clientWidth > 0 && parent.clientHeight > 0) {
       canvas.width = parent.clientWidth;
       canvas.height = parent.clientHeight;
     }
@@ -291,23 +262,34 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
   
   // Animation function for the AI effect visualizations
   const animateEffect = () => {
-    if (!canvasRef.current) return;
-    
     const canvas = canvasRef.current;
+    if (!canvas) {
+      animationFrameRef.current = undefined;
+      return;
+    }
+    
     const ctx = canvas.getContext('2d');
     
-    if (!ctx) return;
+    if (!ctx) {
+      animationFrameRef.current = undefined;
+      return;
+    }
     
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
     // Draw video frame if video is loaded and playing
-    if (videoRef.current && videoRef.current.readyState >= 2 && videoLoaded && !videoError) {
-      ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+    const video = videoRef.current;
+    if (video && video.readyState >= 2 && videoLoadedRef.current && !videoErrorRef.current) {
+      try {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      } catch {
+        // Cross-origin or not-yet-decodable frame - keep the overlay only
+      }
     }
     
     // Apply active effect visualization
-    applyEffectVisualization(ctx, activeFeature, intensity);
+    applyEffectVisualization(ctx, activeFeature, intensityRef.current);
     
     // Schedule next frame
     animationFrameRef.current = requestAnimationFrame(animateEffect);
@@ -342,7 +324,7 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
   
   // Draw face detection visual effect
   const drawFaceDetectionEffect = (ctx: CanvasRenderingContext2D, strength: number) => {
-    if (videoError) return drawSimplifiedFaceDetection(ctx, strength);
+    if (videoErrorRef.current) return drawSimplifiedFaceDetection(ctx, strength);
     
     // Position for face detection rectangle
     const centerX = ctx.canvas.width * 0.5;
@@ -365,7 +347,7 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
     ctx.font = `${Math.round(12 * strength)}px Arial`;
     ctx.textAlign = "left";
     ctx.fillText(
-      `Confidence: ${Math.round(intensity)}%`, 
+      `Confidence: ${Math.round(strength * 100)}%`, 
       centerX - boxWidth/2, 
       centerY - boxHeight/2 - 8
     );
@@ -373,7 +355,7 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
   
   // Draw facial landmarks visualization
   const drawFacialLandmarksEffect = (ctx: CanvasRenderingContext2D, strength: number) => {
-    if (videoError) return drawSimplifiedFacialLandmarks(ctx, strength);
+    if (videoErrorRef.current) return drawSimplifiedFacialLandmarks(ctx, strength);
     
     // Center point for facial features
     const centerX = ctx.canvas.width * 0.5;
@@ -452,7 +434,7 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
   
   // Draw background removal effect
   const drawBackgroundRemovalEffect = (ctx: CanvasRenderingContext2D, strength: number) => {
-    if (videoError) return drawSimplifiedBackgroundRemoval(ctx, strength);
+    if (videoErrorRef.current) return drawSimplifiedBackgroundRemoval(ctx, strength);
     
     // Save current state
     ctx.save();
@@ -513,7 +495,7 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
   
   // Draw background blur effect
   const drawBackgroundBlurEffect = (ctx: CanvasRenderingContext2D, strength: number) => {
-    if (videoError) return; // No simplified version needed, just skip
+    if (videoErrorRef.current) return; // No simplified version needed, just skip
     
     const centerX = ctx.canvas.width * 0.5;
     const centerY = ctx.canvas.height * 0.4;
@@ -582,7 +564,7 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
   
   // Draw beautification effect
   const drawBeautificationEffect = (ctx: CanvasRenderingContext2D, strength: number) => {
-    if (videoError) return; // No simplified version, just skip
+    if (videoErrorRef.current) return; // No simplified version, just skip
     
     // Add a soft color overlay for the "beautification" effect
     ctx.save();
@@ -749,14 +731,16 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
         {/* Feature selector */}
         <div className="md:w-1/3">
           <div className="space-y-3">
-            {features.map((feature) => {
+            {FEATURES.map((feature) => {
               const Icon = feature.icon;
               const isActive = activeFeature === feature.id;
               
               return (
                 <motion.button
                   key={feature.id}
+                  type="button"
                   onClick={() => setActiveFeature(feature.id)}
+                  aria-pressed={isActive}
                   className={`w-full flex items-center p-3 rounded-lg transition-colors ${
                     isActive 
                       ? 'bg-[#E44E51]/10 text-[#E44E51] border-[#E44E51] border' 
@@ -765,7 +749,7 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
                   whileHover={{ x: isActive ? 0 : 5 }}
                   whileTap={{ scale: 0.98 }}
                 >
-                  <Icon className="w-5 h-5 mr-3" />
+                  <Icon className="w-5 h-5 mr-3" aria-hidden="true" />
                   <div className="text-left">
                     <div className="font-medium">{feature.name}</div>
                     {isActive && (
@@ -779,14 +763,16 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
           
           {/* Feature intensity control */}
           <div className="mt-6">
-            <h4 className="text-sm font-medium text-gray-700 mb-2">Effect Intensity</h4>
+            <h4 className="text-sm font-medium text-gray-700 mb-2" id="effect-intensity-label">Effect Intensity</h4>
             <div className="flex items-center space-x-2">
               <button 
+                type="button"
                 onClick={() => setIntensity(Math.max(0, intensity - 10))}
-                className="p-1 bg-gray-100 rounded-full hover:bg-gray-200"
+                className="p-1 bg-gray-100 rounded-full hover:bg-gray-200 disabled:opacity-50"
                 disabled={intensity <= 0}
+                aria-label="Decrease effect intensity"
               >
-                <Minus className="w-4 h-4" />
+                <Minus className="w-4 h-4" aria-hidden="true" />
               </button>
               
               <input
@@ -794,16 +780,20 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
                 min="0"
                 max="100"
                 value={intensity}
-                onChange={(e) => setIntensity(parseInt(e.target.value))}
+                onChange={(e) => setIntensity(Number(e.target.value))}
                 className="flex-grow accent-[#E44E51]"
+                aria-labelledby="effect-intensity-label"
+                aria-valuetext={`${intensity}%`}
               />
               
               <button 
+                type="button"
                 onClick={() => setIntensity(Math.min(100, intensity + 10))}
-                className="p-1 bg-gray-100 rounded-full hover:bg-gray-200"
+                className="p-1 bg-gray-100 rounded-full hover:bg-gray-200 disabled:opacity-50"
                 disabled={intensity >= 100}
+                aria-label="Increase effect intensity"
               >
-                <Plus className="w-4 h-4" />
+                <Plus className="w-4 h-4" aria-hidden="true" />
               </button>
             </div>
           </div>
@@ -811,13 +801,15 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
           {/* Playback controls */}
           <div className="mt-4 flex justify-center">
             <button
+              type="button"
               onClick={() => setIsPlaying(!isPlaying)}
               className="p-3 bg-[#E44E51] text-white rounded-full hover:bg-[#D43B3E] shadow-lg"
+              aria-label={isPlaying ? 'Pause preview' : 'Play preview'}
             >
               {isPlaying ? (
-                <Pause className="w-5 h-5" />
+                <Pause className="w-5 h-5" aria-hidden="true" />
               ) : (
-                <Play className="w-5 h-5" />
+                <Play className="w-5 h-5" aria-hidden="true" />
               )}
             </button>
           </div>
@@ -828,24 +820,47 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
           <div className="relative aspect-video bg-gray-800 rounded-lg overflow-hidden shadow-lg">
             <video 
               ref={videoRef}
-              className="absolute inset-0 w-full h-full object-cover"
+              className={`absolute inset-0 w-full h-full object-cover ${videoError ? 'hidden' : ''}`}
               loop
               muted
-              poster={currentFeature?.fallbackImage}
+              playsInline
+              preload="metadata"
+              poster={currentFeature.fallbackImage}
             />
+
+            {/* Static fallback rendered by React (no manual DOM injection) */}
+            {videoError && (
+              <div className="absolute inset-0">
+                <img
+                  src={currentFeature.fallbackImage}
+                  alt={`${currentFeature.name} preview`}
+                  className="w-full h-full object-cover"
+                />
+                <div className="absolute inset-0 bg-black/30 flex flex-col items-center justify-center text-white">
+                  <div className="w-16 h-16 mb-4 rounded-full bg-white/10 flex items-center justify-center">
+                    <currentFeature.icon className="w-8 h-8" aria-hidden="true" />
+                  </div>
+                  <div className="text-xl font-bold mb-1">{currentFeature.name}</div>
+                  <div className="text-sm text-white/80 text-center max-w-xs px-4">
+                    Static preview - interactive effects will be shown on this canvas
+                  </div>
+                </div>
+              </div>
+            )}
             
             <canvas 
               ref={canvasRef}
+              aria-hidden="true"
               className="absolute inset-0 w-full h-full pointer-events-none"
             />
             
             <div className="absolute bottom-4 left-4 bg-black/50 px-3 py-1.5 rounded-full text-white text-sm flex items-center space-x-2">
-              <currentFeature.icon className="w-4 h-4" />
+              <currentFeature.icon className="w-4 h-4" aria-hidden="true" />
               <span>{currentFeature.name}</span>
             </div>
             
             {videoError && (
-              <div className="absolute right-4 bottom-4 bg-yellow-500/60 text-white text-xs py-1 px-2 rounded">
+              <div className="absolute right-4 bottom-4 bg-yellow-500/60 text-white text-xs py-1 px-2 rounded" role="status">
                 Using static preview
               </div>
             )}

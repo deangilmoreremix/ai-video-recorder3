@@ -1,9 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
-import {
-  Film, Play, Pause, SkipBack, SkipForward, Settings,
-  Download, RefreshCw, Scissors, Check, Save, Wand2,
-  Zap, Smile, Image, Palette, Sliders, Sparkles, Eye
-} from 'lucide-react';
+import { AlertCircle, Film, Play, Pause, SkipBack, SkipForward, Download, RefreshCw, Scissors, Sparkles, Eye, X } from 'lucide-react';
+import { generateGif, isCancellation, toError } from './VideoProcessing';
+
+type OptimizationLevel = 'basic' | 'balanced' | 'maximum';
+
+const OPTIMIZATION_LEVELS: Array<{ id: OptimizationLevel; label: string; desc: string }> = [
+  { id: 'basic', label: 'Basic', desc: 'Fastest export' },
+  { id: 'balanced', label: 'Balanced', desc: 'Recommended' },
+  { id: 'maximum', label: 'Maximum', desc: 'Smallest file' }
+];
 
 interface AnimatedGifCreatorProps {
   videoBlob: Blob | null;
@@ -36,59 +41,79 @@ export const AnimatedGifCreator: React.FC<AnimatedGifCreatorProps> = ({
   
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
   const [isDraggingTimeline, setIsDraggingTimeline] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [previewGif, setPreviewGif] = useState<string | null>(null);
-  const [optimizationLevel, setOptimizationLevel] = useState<'basic' | 'balanced' | 'maximum'>('balanced');
-  
+  const [error, setError] = useState<string | null>(null);
+  const [optimizationLevel, setOptimizationLevel] = useState<OptimizationLevel>('balanced');
+
   const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const frameCanvasRef = useRef<HTMLCanvasElement>(null);
-  const animationFrameRef = useRef<number>();
+  const abortRef = useRef<AbortController | null>(null);
+  // Lets the unmount cleanup revoke the newest preview URL.
+  const previewRef = useRef<string | null>(null);
+  previewRef.current = previewGif;
+
+  // Release the preview URL and stop any running conversion on unmount.
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+      if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+    };
+  }, []);
   
   // Setup
   useEffect(() => {
-    if (videoBlob && videoRef.current) {
-      const url = URL.createObjectURL(videoBlob);
-      videoRef.current.src = url;
-      
-      videoRef.current.onloadedmetadata = () => {
-        if (videoRef.current) {
-          setSettings(prev => ({
-            ...prev,
-            endTime: videoRef.current!.duration
-          }));
-        }
-      };
-      
-      return () => {
-        URL.revokeObjectURL(url);
-      };
-    }
+    const video = videoRef.current;
+    if (!videoBlob || !video) return;
+
+    const url = URL.createObjectURL(videoBlob);
+    video.src = url;
+
+    const handleMetadata = () => {
+      // MediaRecorder files can report Infinity until they are fully scanned.
+      const videoDuration = Number.isFinite(video.duration) ? video.duration : 0;
+      setDuration(videoDuration);
+      setSettings(prev => ({
+        ...prev,
+        endTime: videoDuration,
+        duration: Math.min(prev.duration, Math.max(0.5, videoDuration || prev.duration))
+      }));
+    };
+
+    video.addEventListener('loadedmetadata', handleMetadata);
+    video.addEventListener('durationchange', handleMetadata);
+
+    return () => {
+      video.removeEventListener('loadedmetadata', handleMetadata);
+      video.removeEventListener('durationchange', handleMetadata);
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
+      URL.revokeObjectURL(url);
+    };
   }, [videoBlob]);
-  
+
   // Handle video playback
   useEffect(() => {
-    if (!videoRef.current) return;
-    
-    const updateCurrentTime = () => {
-      if (videoRef.current) {
-        setCurrentTime(videoRef.current.currentTime);
-      }
-    };
-    
+    const video = videoRef.current;
+    if (!video) return;
+
+    const updateCurrentTime = () => setCurrentTime(video.currentTime);
+
     if (isPlaying) {
-      videoRef.current.play();
+      // Autoplay can be rejected - keep the UI in sync instead of throwing.
+      video.play().catch(() => setIsPlaying(false));
     } else {
-      videoRef.current.pause();
+      video.pause();
     }
-    
-    videoRef.current.addEventListener('timeupdate', updateCurrentTime);
-    
+
+    video.addEventListener('timeupdate', updateCurrentTime);
+
     return () => {
-      videoRef.current?.removeEventListener('timeupdate', updateCurrentTime);
-      videoRef.current?.pause();
+      video.removeEventListener('timeupdate', updateCurrentTime);
+      video.pause();
     };
   }, [isPlaying]);
   
@@ -109,83 +134,76 @@ export const AnimatedGifCreator: React.FC<AnimatedGifCreatorProps> = ({
   };
   
   const updateTimeFromMouse = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!videoRef.current) return;
-    
+    const video = videoRef.current;
+    if (!video || !duration) return;
+
     const rect = e.currentTarget.getBoundingClientRect();
-    const position = (e.clientX - rect.left) / rect.width;
-    const newTime = position * videoRef.current.duration;
-    
-    videoRef.current.currentTime = newTime;
+    const position = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    const newTime = position * duration;
+
+    video.currentTime = newTime;
     setCurrentTime(newTime);
   };
-  
-  // Simulated GIF generation
-  const generateGif = async () => {
-    if (!videoBlob || !videoRef.current || !canvasRef.current) return;
-    
+
+  const cancelGeneration = () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setIsProcessing(false);
+    setProgress(0);
+  };
+
+  // Encodes the selected range with ffmpeg.wasm (palettegen + paletteuse).
+  const handleGenerateGif = async () => {
+    if (!videoBlob || isProcessing) return;
+
+    const controller = new AbortController();
+    abortRef.current = controller;
     setIsProcessing(true);
     setProgress(0);
-    
+    setError(null);
+
     try {
-      // Get the video element and canvas
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      const ctx = canvas.getContext('2d');
-      
-      if (!ctx) {
-        throw new Error("Could not get canvas context");
-      }
-      
-      // Set canvas size based on width setting
-      const aspectRatio = video.videoHeight / video.videoWidth;
-      canvas.width = settings.width;
-      canvas.height = Math.round(settings.width * aspectRatio);
-      
-      // Begin simulated processing
-      // For a real implementation, you'd use a library like gif.js or FFmpeg
-      
-      // Calculate frames needed based on duration and fps
-      const startTime = settings.startTime;
-      const endTime = Math.min(settings.startTime + settings.duration, video.duration);
-      const duration = endTime - startTime;
-      const frameCount = Math.floor(duration * settings.fps);
-      
-      // Simulate processing time
-      for (let i = 0; i < frameCount; i++) {
-        // Update progress (first 50% is frame capture)
-        setProgress(Math.min(Math.round((i / frameCount) * 50), 50));
-        
-        // Simulate frame processing delay
-        await new Promise(resolve => setTimeout(resolve, 50));
-      }
-      
-      // Simulate encoding (second 50% of progress)
-      for (let i = 50; i <= 100; i += 5) {
-        setProgress(i);
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
-      
-      // Create a sample blob (would be a real GIF in production)
-      const gifBlob = new Blob([await fetch('https://media.giphy.com/media/3o7TKoWXm3okO1kgHC/giphy.gif').then(r => r.blob())], { type: 'image/gif' });
-      
-      // Create URL for preview
-      if (previewGif) {
-        URL.revokeObjectURL(previewGif);
-      }
-      
-      const url = URL.createObjectURL(gifBlob);
-      setPreviewGif(url);
-      
-      // Call onGenerate callback if provided
-      if (onGenerate) {
-        onGenerate(gifBlob);
-      }
-      
-    } catch (error) {
-      console.error("Error generating GIF:", error);
+      const startTime = Math.max(0, settings.startTime);
+      const endTime = duration > 0
+        ? Math.min(startTime + settings.duration, duration)
+        : startTime + settings.duration;
+
+      // Fewer colours / diff palettes shrink the file, at the cost of quality.
+      const colors =
+        optimizationLevel === 'maximum'
+          ? Math.min(settings.colors, 128)
+          : optimizationLevel === 'basic'
+          ? settings.colors
+          : Math.min(settings.colors, 192);
+
+      const gifBlob = await generateGif(
+        videoBlob,
+        {
+          fps: settings.fps,
+          quality: settings.quality,
+          width: settings.width,
+          colors,
+          dither: settings.dithering,
+          optimize: optimizationLevel !== 'basic' && settings.optimize,
+          startTime,
+          endTime,
+          loop: settings.loop
+        },
+        setProgress,
+        controller.signal
+      );
+
+      setPreviewGif(prev => {
+        if (prev) URL.revokeObjectURL(prev);
+        return URL.createObjectURL(gifBlob);
+      });
+
+      onGenerate?.(gifBlob);
+    } catch (err) {
+      if (!isCancellation(err)) setError(toError(err).message);
     } finally {
+      abortRef.current = null;
       setIsProcessing(false);
-      setProgress(100);
     }
   };
   
@@ -207,18 +225,6 @@ export const AnimatedGifCreator: React.FC<AnimatedGifCreatorProps> = ({
               ref={videoRef}
               className="w-full h-full"
               onEnded={() => setIsPlaying(false)}
-            />
-            
-            {/* Canvas for processing */}
-            <canvas
-              ref={canvasRef}
-              className="absolute inset-0 pointer-events-none"
-            />
-            
-            {/* Hidden canvas for frame extraction */}
-            <canvas
-              ref={frameCanvasRef}
-              className="hidden"
             />
             
             {/* GIF Preview Overlay */}
@@ -261,6 +267,14 @@ export const AnimatedGifCreator: React.FC<AnimatedGifCreatorProps> = ({
                   ></div>
                 </div>
                 <p className="mt-3 text-white">{progress}% Complete</p>
+                <button
+                  onClick={cancelGeneration}
+                  className="mt-3 px-3 py-1.5 text-sm bg-white/20 text-white rounded-lg 
+                    hover:bg-white/30 flex items-center space-x-1"
+                >
+                  <X className="w-4 h-4" />
+                  <span>Cancel</span>
+                </button>
               </div>
             )}
           </div>
@@ -294,7 +308,7 @@ export const AnimatedGifCreator: React.FC<AnimatedGifCreatorProps> = ({
                   onClick={() => {
                     if (videoRef.current) {
                       videoRef.current.currentTime = Math.min(
-                        videoRef.current.duration,
+                        duration || videoRef.current.currentTime + 1,
                         videoRef.current.currentTime + 1
                       );
                     }
@@ -305,7 +319,7 @@ export const AnimatedGifCreator: React.FC<AnimatedGifCreatorProps> = ({
                 </button>
               </div>
               <div className="text-sm text-gray-600">
-                {formatTime(currentTime)} / {formatTime(videoRef.current?.duration || 0)}
+                {formatTime(currentTime)} / {formatTime(duration)}
               </div>
             </div>
             
@@ -321,7 +335,7 @@ export const AnimatedGifCreator: React.FC<AnimatedGifCreatorProps> = ({
               <div 
                 className="absolute h-full bg-gray-300 rounded-full"
                 style={{ 
-                  width: `${((currentTime) / (videoRef.current?.duration || 1)) * 100}%` 
+                  width: `${(currentTime / (duration || 1)) * 100}%` 
                 }}
               ></div>
               
@@ -329,8 +343,8 @@ export const AnimatedGifCreator: React.FC<AnimatedGifCreatorProps> = ({
               <div
                 className="absolute h-full bg-[#E44E51]/30 rounded-full"
                 style={{
-                  left: `${(settings.startTime / (videoRef.current?.duration || 1)) * 100}%`,
-                  width: `${((Math.min(settings.startTime + settings.duration, videoRef.current?.duration || 0) - settings.startTime) / (videoRef.current?.duration || 1)) * 100}%`
+                  left: `${(settings.startTime / (duration || 1)) * 100}%`,
+                  width: `${((Math.min(settings.startTime + settings.duration, duration || settings.startTime + settings.duration) - settings.startTime) / (duration || 1)) * 100}%`
                 }}
               ></div>
               
@@ -338,7 +352,7 @@ export const AnimatedGifCreator: React.FC<AnimatedGifCreatorProps> = ({
               <div
                 className="absolute top-0 h-full w-2 bg-[#E44E51] rounded-full transform -translate-x-1/2"
                 style={{ 
-                  left: `${(currentTime / (videoRef.current?.duration || 1)) * 100}%` 
+                  left: `${(currentTime / (duration || 1)) * 100}%` 
                 }}
               ></div>
             </div>
@@ -425,14 +439,10 @@ export const AnimatedGifCreator: React.FC<AnimatedGifCreatorProps> = ({
               </div>
               
               <div className="grid grid-cols-3 gap-2">
-                {[
-                  { id: 'basic', label: 'Basic', desc: 'Fastest export' },
-                  { id: 'balanced', label: 'Balanced', desc: 'Recommended' },
-                  { id: 'maximum', label: 'Maximum', desc: 'Smallest file' }
-                ].map(option => (
+                {OPTIMIZATION_LEVELS.map(option => (
                   <button
                     key={option.id}
-                    onClick={() => setOptimizationLevel(option.id as any)}
+                    onClick={() => setOptimizationLevel(option.id)}
                     className={`p-2 rounded-lg text-sm text-center border ${
                       optimizationLevel === option.id
                         ? 'bg-[#E44E51]/10 border-[#E44E51] text-gray-900'
@@ -598,37 +608,46 @@ export const AnimatedGifCreator: React.FC<AnimatedGifCreatorProps> = ({
             </div>
             
             {/* Create GIF Button */}
-            <div className="flex space-x-3 items-center">
-              <button
-                onClick={generateGif}
-                disabled={isProcessing}
-                className="flex-1 py-2 bg-[#E44E51] text-white rounded-lg hover:bg-[#D43B3E] 
-                  disabled:opacity-50 flex items-center justify-center"
-              >
-                {isProcessing ? (
-                  <>
-                    <RefreshCw className="w-5 h-5 mr-2 animate-spin" />
-                    <span>Processing...</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-5 h-5 mr-2" />
-                    <span>Create GIF</span>
-                  </>
-                )}
-              </button>
-              
-              {previewGif && (
-                <a
-                  href={previewGif}
-                  download="animation.gif"
-                  className="py-2 px-4 bg-gray-700 text-white rounded-lg hover:bg-gray-800 
-                    flex items-center justify-center"
-                >
-                  <Download className="w-5 h-5 mr-2" />
-                  <span>Download</span>
-                </a>
+            <div className="space-y-3">
+              {error && (
+                <div className="p-3 bg-red-50 text-red-700 rounded-lg text-sm flex items-start space-x-2">
+                  <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                  <span>{error}</span>
+                </div>
               )}
+
+              <div className="flex space-x-3 items-center">
+                <button
+                  onClick={isProcessing ? cancelGeneration : handleGenerateGif}
+                  disabled={!videoBlob}
+                  className="flex-1 py-2 bg-[#E44E51] text-white rounded-lg hover:bg-[#D43B3E] 
+                    disabled:opacity-50 flex items-center justify-center"
+                >
+                  {isProcessing ? (
+                    <>
+                      <X className="w-5 h-5 mr-2" />
+                      <span>Cancel ({progress}%)</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-5 h-5 mr-2" />
+                      <span>Create GIF</span>
+                    </>
+                  )}
+                </button>
+
+                {previewGif && (
+                  <a
+                    href={previewGif}
+                    download="animation.gif"
+                    className="py-2 px-4 bg-gray-700 text-white rounded-lg hover:bg-gray-800 
+                      flex items-center justify-center"
+                  >
+                    <Download className="w-5 h-5 mr-2" />
+                    <span>Download</span>
+                  </a>
+                )}
+              </div>
             </div>
           </div>
         </div>

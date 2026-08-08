@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 
 interface AIFeatureDemoProps {
@@ -18,42 +18,45 @@ export const AIFeatureDemo: React.FC<AIFeatureDemoProps> = ({
   color,
   reversed = false
 }) => {
-  // Handle video error
-  const handleVideoError = (e: React.SyntheticEvent<HTMLVideoElement, Event>) => {
-    console.error('Video failed to load:', videoUrl);
-    // Set a fallback background color
-    const target = e.currentTarget;
-    target.style.backgroundColor = '#2d3748';
-    
-    // Add a message to indicate the video couldn't be loaded
-    const parent = target.parentElement;
-    if (parent) {
-      const errorMsg = document.createElement('div');
-      errorMsg.className = 'absolute inset-0 flex items-center justify-center text-white text-center p-4';
-      errorMsg.innerHTML = `<div><Icon class="w-12 h-12 mx-auto mb-2 opacity-50"></Icon><p>Feature preview unavailable</p></div>`;
-      parent.appendChild(errorMsg);
-    }
+  const [videoFailed, setVideoFailed] = useState(false);
+
+  // Handle video error - render the fallback with React rather than injecting
+  // markup into a DOM node that React controls.
+  const handleVideoError = () => {
+    console.warn('Video failed to load:', videoUrl);
+    setVideoFailed(true);
   };
 
   return (
     <div className="md:flex md:items-center md:space-x-10">
       <div className={`md:w-1/2 ${reversed ? 'order-2' : 'order-1'}`}>
         <motion.div
-          className="relative aspect-video rounded-xl overflow-hidden shadow-xl"
+          className="relative aspect-video rounded-xl overflow-hidden shadow-xl bg-gray-800"
           initial={{ opacity: 0, x: reversed ? 50 : -50 }}
           whileInView={{ opacity: 1, x: 0 }}
           viewport={{ once: true, margin: "-100px" }}
           transition={{ duration: 0.8 }}
         >
-          <video 
-            className="w-full h-full object-cover"
-            src={videoUrl}
-            autoPlay
-            loop
-            muted
-            onError={handleVideoError}
-            poster="https://images.unsplash.com/photo-1593697821029-1cfd732d2e26?auto=format&fit=crop&w=800&q=80"
-          ></video>
+          {videoFailed ? (
+            <div className="absolute inset-0 flex items-center justify-center text-white text-center p-4">
+              <div>
+                <Icon className="w-12 h-12 mx-auto mb-2 opacity-50" aria-hidden="true" />
+                <p>Feature preview unavailable</p>
+              </div>
+            </div>
+          ) : (
+            <video 
+              className="w-full h-full object-cover"
+              src={videoUrl}
+              autoPlay
+              loop
+              muted
+              playsInline
+              preload="metadata"
+              onError={handleVideoError}
+              poster="https://images.unsplash.com/photo-1593697821029-1cfd732d2e26?auto=format&fit=crop&w=800&q=80"
+            ></video>
+          )}
           
           {/* Feature overlay UI */}
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent">

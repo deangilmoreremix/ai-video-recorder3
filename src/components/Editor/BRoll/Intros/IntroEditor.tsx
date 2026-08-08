@@ -1,22 +1,30 @@
-import React, { useState, useRef, useCallback } from 'react';
-import { 
-  Type, Image, Music, Settings, Palette, Clock,
-  AlignLeft, AlignCenter, AlignRight, Bold, Italic,
-  X, Save, Upload, Play, Download, Share2, Film,
-  Camera, Wand2, Sparkles, Layers, Focus, Brain,
-  CloudFog, Plus, Trash2, Eye, Volume2, VolumeX,
-  Maximize2, Minimize2
-} from 'lucide-react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { Type, Image, Settings, Palette, AlignLeft, AlignCenter, AlignRight, Save, Sparkles, Focus, CloudFog, Eye, ChevronRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { HexColorPicker } from 'react-colorful';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei';
 import { Tooltip } from '../../../ui/Tooltip';
-import { useIntroStore } from '../../../../store/introStore';
+import { useIntroStore, type IntroTemplate } from '../../../../store/introStore';
+
+type IntroSettings = IntroTemplate['settings'];
+type IntroText = IntroSettings['text'];
+type IntroStyle = IntroSettings['style'];
+type IntroMedia = IntroSettings['media'];
+type IntroAdvanced = IntroSettings['advanced'];
+type ParticleSettings = NonNullable<IntroMedia['particles']>;
+type ResponsiveDevice = 'mobile' | 'tablet' | 'desktop';
+
+const DEFAULT_PARTICLES: ParticleSettings = {
+  enabled: true,
+  type: 'geometric',
+  density: 0.5
+};
+
+const DEVICES: ResponsiveDevice[] = ['mobile', 'tablet', 'desktop'];
 
 interface IntroEditorProps {
   templateId: string;
-  onSave: (data: any) => void;
+  onSave: (data: Pick<IntroSettings, 'text' | 'style' | 'media' | 'advanced'>) => void;
 }
 
 export const IntroEditor: React.FC<IntroEditorProps> = ({ templateId, onSave }) => {
@@ -24,14 +32,14 @@ export const IntroEditor: React.FC<IntroEditorProps> = ({ templateId, onSave }) 
     state.templates.find(t => t.id === templateId)
   );
 
-  const [text, setText] = useState(template?.settings.text || {
+  const [text, setText] = useState<IntroText>(template?.settings.text || {
     title: '',
     subtitle: '',
     tagline: '',
     callToAction: ''
   });
 
-  const [style, setStyle] = useState(template?.settings.style || {
+  const [style, setStyle] = useState<IntroStyle>(template?.settings.style || {
     fontFamily: 'Inter',
     titleSize: 48,
     alignment: 'center',
@@ -50,26 +58,35 @@ export const IntroEditor: React.FC<IntroEditorProps> = ({ templateId, onSave }) 
     }
   });
 
-  const [media, setMedia] = useState(template?.settings.media || {
+  const [media, setMedia] = useState<IntroMedia>(template?.settings.media || {
     background: null,
     overlay: null,
     logo: null,
     music: null,
     volume: 1,
-    particles: {
-      enabled: true,
-      type: 'geometric',
-      density: 0.5
-    }
+    particles: { ...DEFAULT_PARTICLES }
   });
 
-  const [showColorPicker, setShowColorPicker] = useState(false);
-  const [activeColorTarget, setActiveColorTarget] = useState<string | null>(null);
-  const [showParticleEditor, setShowParticleEditor] = useState(false);
+  const [advanced, setAdvanced] = useState<IntroAdvanced>(
+    template?.settings.advanced || {}
+  );
+
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
   const [isPreviewMode, setIsPreviewMode] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const previewRef = useRef<HTMLDivElement>(null);
+  // Object URLs created for uploaded media, released when the editor unmounts.
+  const objectUrls = useRef<string[]>([]);
+
+  const particles = media.particles ?? DEFAULT_PARTICLES;
+
+  useEffect(() => {
+    const urls = objectUrls.current;
+    return () => {
+      urls.forEach((url) => URL.revokeObjectURL(url));
+      urls.length = 0;
+    };
+  }, []);
 
   const fonts = [
     'Inter', 'Roboto', 'Montserrat', 'Playfair Display', 'Open Sans',
@@ -84,28 +101,53 @@ export const IntroEditor: React.FC<IntroEditorProps> = ({ templateId, onSave }) 
     { id: 'rotate', name: 'Rotate' }
   ];
 
-  const particleTypes = [
+  const particleTypes: { id: ParticleSettings['type']; name: string }[] = [
     { id: 'confetti', name: 'Confetti' },
     { id: 'sparkles', name: 'Sparkles' },
     { id: 'bubbles', name: 'Bubbles' },
     { id: 'geometric', name: 'Geometric' }
   ];
 
-  const handleMediaUpload = useCallback(async (type: 'background' | 'overlay' | 'logo' | 'music', file: File) => {
-    const url = URL.createObjectURL(file);
+  const updateParticles = useCallback((updates: Partial<ParticleSettings>) => {
     setMedia(prev => ({
       ...prev,
-      [type]: url
+      particles: { ...(prev.particles ?? DEFAULT_PARTICLES), ...updates }
     }));
   }, []);
 
+  const updateResponsiveScale = useCallback((device: ResponsiveDevice, scale: number) => {
+    setAdvanced(prev => {
+      const current = prev.responsiveSettings ?? {
+        mobile: { scale: 1, position: { x: 0, y: 0 } },
+        tablet: { scale: 1, position: { x: 0, y: 0 } },
+        desktop: { scale: 1, position: { x: 0, y: 0 } }
+      };
+
+      return {
+        ...prev,
+        responsiveSettings: {
+          ...current,
+          [device]: { ...current[device], scale }
+        }
+      };
+    });
+  }, []);
+
+  const handleMediaUpload = useCallback(async (type: 'background' | 'overlay' | 'logo' | 'music', file: File) => {
+    const url = URL.createObjectURL(file);
+    objectUrls.current.push(url);
+    setMedia(prev => {
+      const previous = prev[type];
+      if (typeof previous === 'string' && previous.startsWith('blob:')) {
+        URL.revokeObjectURL(previous);
+        objectUrls.current = objectUrls.current.filter((entry) => entry !== previous);
+      }
+      return { ...prev, [type]: url };
+    });
+  }, []);
+
   const handleSave = async () => {
-    const templateData = {
-      text,
-      style,
-      media
-    };
-    onSave(templateData);
+    onSave({ text, style, media, advanced });
   };
 
   const togglePreviewMode = () => {
@@ -225,7 +267,7 @@ export const IntroEditor: React.FC<IntroEditorProps> = ({ templateId, onSave }) 
         </div>
 
         {/* Particle Effects */}
-        {media.particles.enabled && (
+        {particles.enabled && (
           <Canvas className="absolute inset-0 pointer-events-none">
             <PerspectiveCamera makeDefault position={[0, 0, 5]} />
             <OrbitControls enableZoom={false} enablePan={false} enableRotate={false} />
@@ -287,7 +329,7 @@ export const IntroEditor: React.FC<IntroEditorProps> = ({ templateId, onSave }) 
                 </label>
                 <input
                   type="text"
-                  value={text.callToAction}
+                  value={text.callToAction ?? ''}
                   onChange={(e) => setText({ ...text, callToAction: e.target.value })}
                   className="w-full rounded-lg border-gray-300 shadow-sm"
                   placeholder="Enter call to action text"
@@ -494,14 +536,8 @@ export const IntroEditor: React.FC<IntroEditorProps> = ({ templateId, onSave }) 
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={media.particles.enabled}
-                    onChange={(e) => setMedia({
-                      ...media,
-                      particles: {
-                        ...media.particles,
-                        enabled: e.target.checked
-                      }
-                    })}
+                    checked={particles.enabled}
+                    onChange={(e) => updateParticles({ enabled: e.target.checked })}
                     className="sr-only peer"
                   />
                   <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 
@@ -512,20 +548,16 @@ export const IntroEditor: React.FC<IntroEditorProps> = ({ templateId, onSave }) 
                 </label>
               </div>
 
-              {media.particles.enabled && (
+              {particles.enabled && (
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm text-gray-700 mb-1">
                       Type
                     </label>
                     <select
-                      value={media.particles.type}
-                      onChange={(e) => setMedia({
-                        ...media,
-                        particles: {
-                          ...media.particles,
-                          type: e.target.value as any
-                        }
+                      value={particles.type}
+                      onChange={(e) => updateParticles({
+                        type: e.target.value as ParticleSettings['type']
                       })}
                       className="w-full rounded-lg border-gray-300 shadow-sm"
                     >
@@ -543,13 +575,9 @@ export const IntroEditor: React.FC<IntroEditorProps> = ({ templateId, onSave }) 
                       min="0.1"
                       max="1"
                       step="0.1"
-                      value={media.particles.density}
-                      onChange={(e) => setMedia({
-                        ...media,
-                        particles: {
-                          ...media.particles,
-                          density: parseFloat(e.target.value)
-                        }
+                      value={particles.density}
+                      onChange={(e) => updateParticles({
+                        density: parseFloat(e.target.value) || 0
                       })}
                       className="w-full accent-[#E44E51]"
                     />
@@ -608,7 +636,7 @@ export const IntroEditor: React.FC<IntroEditorProps> = ({ templateId, onSave }) 
                               ...style,
                               transitions: {
                                 ...style.transitions,
-                                duration: parseFloat(e.target.value)
+                                duration: parseFloat(e.target.value) || 0
                               }
                             })}
                             className="w-full rounded-lg border-gray-300 shadow-sm"
@@ -644,32 +672,29 @@ export const IntroEditor: React.FC<IntroEditorProps> = ({ templateId, onSave }) 
                         Responsive Settings
                       </label>
                       <div className="space-y-3">
-                        {['mobile', 'tablet', 'desktop'].map((device) => (
-                          <div key={device} className="flex items-center space-x-4">
-                            <span className="text-sm capitalize w-20">{device}</span>
-                            <input
-                              type="range"
-                              min="0.5"
-                              max="1.5"
-                              step="0.1"
-                              value={style.responsiveSettings?.[device]?.scale || 1}
-                              onChange={(e) => setStyle({
-                                ...style,
-                                responsiveSettings: {
-                                  ...style.responsiveSettings,
-                                  [device]: {
-                                    ...style.responsiveSettings?.[device],
-                                    scale: parseFloat(e.target.value)
-                                  }
-                                }
-                              })}
-                              className="flex-1 accent-[#E44E51]"
-                            />
-                            <span className="text-sm w-12">
-                              {(style.responsiveSettings?.[device]?.scale || 1) * 100}%
-                            </span>
-                          </div>
-                        ))}
+                        {DEVICES.map((device) => {
+                          const scale = advanced.responsiveSettings?.[device]?.scale ?? 1;
+                          return (
+                            <div key={device} className="flex items-center space-x-4">
+                              <span className="text-sm capitalize w-20">{device}</span>
+                              <input
+                                type="range"
+                                min="0.5"
+                                max="1.5"
+                                step="0.1"
+                                value={scale}
+                                onChange={(e) => updateResponsiveScale(
+                                  device,
+                                  parseFloat(e.target.value) || 1
+                                )}
+                                className="flex-1 accent-[#E44E51]"
+                              />
+                              <span className="text-sm w-12">
+                                {Math.round(scale * 100)}%
+                              </span>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   </div>

@@ -1,11 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { 
-  Download, Loader, Video, Settings, Youtube, Instagram,
-  Twitter, Facebook, Linkedin, Globe, ChevronRight, 
-  X, Play, Check, Camera, Wand2, Film, ArrowRight,
-  Folder, Tag, Plus, Clock
-} from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { Loader, Video, Youtube, Instagram, Twitter, Facebook, Linkedin, Globe, X, Folder, Tag, Plus, Save } from 'lucide-react';
+import { motion } from 'framer-motion';
 import { getFolders } from '../../utils/supabaseClient';
 import { generateThumbnail } from '../../utils/videoProcessing';
 
@@ -22,6 +17,31 @@ interface EnhancedDownloadDialogProps {
   onRecordingFolderChange: (folder: string | null) => void;
 }
 
+/** Maps a recorded blob type (e.g. `video/webm;codecs=vp9`) to a file extension. */
+const getBlobExtension = (blob: Blob | null): string => {
+  const subtype = blob?.type.split('/')[1]?.split(';')[0]?.trim().toLowerCase();
+  if (!subtype) return 'webm';
+  if (subtype === 'quicktime') return 'mov';
+  if (subtype === 'x-matroska') return 'mkv';
+  return subtype;
+};
+
+/** Keeps file names safe for every OS. */
+const toSafeFileName = (name: string): string =>
+  (name.trim() || 'recording').replace(/[\\/:*?"<>|]+/g, '-').slice(0, 120);
+
+const formatFileSize = (bytes: number): string => {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB'];
+  let value = bytes / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value.toFixed(1)} ${units[unitIndex]}`;
+};
+
 export const EnhancedDownloadDialog: React.FC<EnhancedDownloadDialogProps> = ({
   isOpen,
   onClose,
@@ -37,13 +57,15 @@ export const EnhancedDownloadDialog: React.FC<EnhancedDownloadDialogProps> = ({
   const [activeTab, setActiveTab] = useState('format');
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [previewMode, setPreviewMode] = useState(false);
   const [newTag, setNewTag] = useState('');
   const [folders, setFolders] = useState<string[]>([]);
   const [isLoadingFolders, setIsLoadingFolders] = useState(false);
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  // Every object URL handed out, so none of them leak when the dialog closes
+  const objectUrlsRef = useRef<string[]>([]);
 
   // Settings for exporting
   const [settings, setSettings] = useState({
@@ -57,52 +79,94 @@ export const EnhancedDownloadDialog: React.FC<EnhancedDownloadDialogProps> = ({
 
   // Load folders
   useEffect(() => {
+    let cancelled = false;
+
     const loadFolders = async () => {
       setIsLoadingFolders(true);
       try {
         const folderList = await getFolders();
-        setFolders(folderList);
-      } catch (error) {
-        console.error('Error loading folders:', error);
+        if (!cancelled) setFolders(folderList);
+      } catch (err) {
+        // Supabase may be unavailable – folders are optional metadata
+        console.error('Error loading folders:', err);
       } finally {
-        setIsLoadingFolders(false);
+        if (!cancelled) setIsLoadingFolders(false);
       }
     };
     
     if (isOpen) {
       loadFolders();
     }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
+
+  // Preview URL: created once per blob instead of on every render
+  useEffect(() => {
+    if (!isOpen || !recordedBlob) {
+      setPreviewUrl(null);
+      return;
+    }
+
+    const url = URL.createObjectURL(recordedBlob);
+    setPreviewUrl(url);
+
+    return () => {
+      URL.revokeObjectURL(url);
+    };
+  }, [recordedBlob, isOpen]);
+
+  // Revoke any URL handed to the parent when the dialog closes or unmounts
+  useEffect(() => {
+    const urls = objectUrlsRef.current;
+    if (!isOpen && urls.length > 0) {
+      urls.forEach(url => URL.revokeObjectURL(url));
+      urls.length = 0;
+    }
+
+    return () => {
+      urls.forEach(url => URL.revokeObjectURL(url));
+      urls.length = 0;
+    };
   }, [isOpen]);
 
   // Generate thumbnail when blob is available
   useEffect(() => {
+    if (!recordedBlob || !isOpen) return;
+
+    let cancelled = false;
+
     const generateThumbnailFromVideo = async () => {
-      if (!recordedBlob || !videoRef.current) return;
-      
       try {
-        // Create a File object from the Blob
-        const file = new File([recordedBlob], 'recording.webm', { 
-          type: recordedBlob.type 
+        // Create a File object from the Blob (no copy, safe for large takes)
+        const file = new File([recordedBlob], `recording.${getBlobExtension(recordedBlob)}`, {
+          type: recordedBlob.type
         });
         
         // Generate a thumbnail
         const thumbnail = await generateThumbnail(file);
-        setThumbnailUrl(thumbnail);
-      } catch (error) {
-        console.error('Error generating thumbnail:', error);
+        if (!cancelled) setThumbnailUrl(thumbnail);
+      } catch (err) {
+        // A missing thumbnail must never block saving the recording
+        console.error('Error generating thumbnail:', err);
       }
     };
-    
-    if (recordedBlob && isOpen) {
-      generateThumbnailFromVideo();
-    }
+
+    generateThumbnailFromVideo();
+
+    return () => {
+      cancelled = true;
+    };
   }, [recordedBlob, isOpen]);
 
   const handleExport = async () => {
-    if (!recordedBlob) return;
+    if (!recordedBlob || isProcessing) return;
 
     setIsProcessing(true);
     setProgress(0);
+    setError(null);
 
     try {
       // Simulated export process with progress updates
@@ -114,23 +178,25 @@ export const EnhancedDownloadDialog: React.FC<EnhancedDownloadDialogProps> = ({
       // Create a download URL
       const url = URL.createObjectURL(recordedBlob);
       
-      if (onSave && thumbnailUrl) {
-        // Save to database
-        onSave(recordedBlob, url, thumbnailUrl);
+      if (onSave) {
+        // Save to database – the URL stays alive until this dialog unmounts
+        objectUrlsRef.current.push(url);
+        onSave(recordedBlob, url, thumbnailUrl ?? '');
       } else {
-        // Direct download
+        // Direct download, using the extension the recording really has
         const a = document.createElement('a');
         a.href = url;
-        a.download = `${recordingTitle || 'video'}.${settings.format}`;
+        a.download = `${toSafeFileName(recordingTitle)}.${getBlobExtension(recordedBlob)}`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        // Give the browser a tick to pick up the download before releasing it
+        window.setTimeout(() => URL.revokeObjectURL(url), 10000);
         onClose();
       }
-    } catch (error) {
-      console.error('Export failed:', error);
-      alert('Export failed. Please try again.');
+    } catch (err) {
+      console.error('Export failed:', err);
+      setError('Export failed. Please try again.');
     } finally {
       setIsProcessing(false);
       setProgress(0);
@@ -184,6 +250,13 @@ export const EnhancedDownloadDialog: React.FC<EnhancedDownloadDialogProps> = ({
         </div>
 
         <div className="p-6">
+          {error && (
+            <div className="mb-4 p-3 rounded-lg border border-[#E44E51]/30 bg-[#E44E51]/10 
+              text-sm text-[#E44E51]">
+              {error}
+            </div>
+          )}
+
           {/* Recording Details */}
           <div className="mb-6 space-y-4">
             <div>
@@ -249,9 +322,10 @@ export const EnhancedDownloadDialog: React.FC<EnhancedDownloadDialogProps> = ({
                 <select
                   value={recordingFolder || ''}
                   onChange={(e) => onRecordingFolderChange(e.target.value === '' ? null : e.target.value)}
-                  className="w-full rounded-lg border-gray-300 pr-10"
+                  disabled={isLoadingFolders}
+                  className="w-full rounded-lg border-gray-300 pr-10 disabled:opacity-60"
                 >
-                  <option value="">None</option>
+                  <option value="">{isLoadingFolders ? 'Loading folders…' : 'None'}</option>
                   {folders.map(folder => (
                     <option key={folder} value={folder}>{folder}</option>
                   ))}
@@ -310,11 +384,18 @@ export const EnhancedDownloadDialog: React.FC<EnhancedDownloadDialogProps> = ({
                   <div className="aspect-video bg-gray-900 rounded-lg overflow-hidden shadow-lg">
                     <video
                       ref={videoRef}
-                      src={recordedBlob ? URL.createObjectURL(recordedBlob) : undefined}
+                      src={previewUrl ?? undefined}
                       className="w-full h-full"
                       controls
+                      preload="metadata"
                     ></video>
                   </div>
+
+                  {recordedBlob && (
+                    <p className="mt-2 text-xs text-gray-500">
+                      {getBlobExtension(recordedBlob).toUpperCase()} · {formatFileSize(recordedBlob.size)}
+                    </p>
+                  )}
                   
                   {thumbnailUrl && (
                     <div className="mt-4 relative">
@@ -354,6 +435,11 @@ export const EnhancedDownloadDialog: React.FC<EnhancedDownloadDialogProps> = ({
                           </button>
                         ))}
                       </div>
+                      <p className="mt-2 text-xs text-gray-500">
+                        Recordings are saved in their original{' '}
+                        {getBlobExtension(recordedBlob).toUpperCase()} format; the selected format is
+                        used for platform presets.
+                      </p>
                     </div>
                     
                     <div>

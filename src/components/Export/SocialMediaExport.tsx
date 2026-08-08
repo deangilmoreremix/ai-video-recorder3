@@ -1,30 +1,31 @@
 import React, { useState } from 'react';
-import { 
-  Youtube, Instagram, Twitter, Facebook, Linkedin,
-  Globe, Share2, Settings, Check, AlertCircle, Link, Copy,
-  ChevronDown, ChevronRight, Info, Music2
-} from 'lucide-react';
-import { motion } from 'framer-motion';
+import { Youtube, Instagram, Twitter, Facebook, Linkedin, Share2, Settings, ChevronRight, Info, Music2, AlertCircle } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { Tooltip } from '../ui/Tooltip';
+
+export interface SocialExportSettings {
+  resolution: { width: number; height: number };
+  aspectRatio: string;
+  fps: number;
+  bitrate: number;
+}
 
 interface Platform {
   id: string;
   name: string;
-  icon: any;
+  icon: LucideIcon;
+  /** seconds */
   maxDuration: number;
+  /** megabytes */
   maxSize: number;
-  recommendedSettings: {
-    resolution: { width: number; height: number };
-    aspectRatio: string;
-    fps: number;
-    bitrate: number;
-  };
+  recommendedSettings: SocialExportSettings;
 }
 
 interface SocialMediaExportProps {
   duration: number;
+  /** bytes */
   fileSize: number;
-  onExport: (platform: string, settings: any) => Promise<void>;
+  onExport: (platform: string, settings: SocialExportSettings) => Promise<void>;
 }
 
 const platforms: Platform[] = [
@@ -108,6 +109,57 @@ const platforms: Platform[] = [
   }
 ];
 
+const defaultSettings: SocialExportSettings = platforms[0].recommendedSettings;
+
+/**
+ * Only offer resolutions that match the platform aspect ratio - mixing a 16:9
+ * frame into a 9:16 preset produces letterboxed (or rejected) uploads.
+ */
+const resolutionOptions = (aspectRatio: string): Array<{ width: number; height: number; label: string }> => {
+  switch (aspectRatio) {
+    case '9:16':
+      return [
+        { width: 1080, height: 1920, label: '1080p (1080x1920)' },
+        { width: 720, height: 1280, label: '720p (720x1280)' },
+        { width: 480, height: 854, label: '480p (480x854)' }
+      ];
+    case '1:1':
+      return [
+        { width: 1080, height: 1080, label: '1080p (1080x1080)' },
+        { width: 720, height: 720, label: '720p (720x720)' },
+        { width: 480, height: 480, label: '480p (480x480)' }
+      ];
+    case '4:3':
+      return [
+        { width: 1440, height: 1080, label: '1080p (1440x1080)' },
+        { width: 960, height: 720, label: '720p (960x720)' },
+        { width: 640, height: 480, label: '480p (640x480)' }
+      ];
+    case '16:9':
+    default:
+      return [
+        { width: 1920, height: 1080, label: '1080p (1920x1080)' },
+        { width: 1280, height: 720, label: '720p (1280x720)' },
+        { width: 854, height: 480, label: '480p (854x480)' }
+      ];
+  }
+};
+
+const formatDuration = (seconds: number): string => {
+  if (seconds >= 3600) {
+    const hours = seconds / 3600;
+    return `${Number.isInteger(hours) ? hours : hours.toFixed(1)} hours`;
+  }
+  if (seconds >= 60) {
+    const minutes = seconds / 60;
+    return `${Number.isInteger(minutes) ? minutes : minutes.toFixed(1)} minutes`;
+  }
+  return `${seconds} seconds`;
+};
+
+const formatSize = (megabytes: number): string =>
+  megabytes >= 1024 ? `${Math.round(megabytes / 1024)} GB` : `${Math.round(megabytes)} MB`;
+
 export const SocialMediaExport: React.FC<SocialMediaExportProps> = ({
   duration,
   fileSize,
@@ -115,15 +167,20 @@ export const SocialMediaExport: React.FC<SocialMediaExportProps> = ({
 }) => {
   const [selectedPlatform, setSelectedPlatform] = useState<Platform | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [settings, setSettings] = useState(selectedPlatform?.recommendedSettings || {});
+  const [settings, setSettings] = useState<SocialExportSettings>(defaultSettings);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleExport = async () => {
-    if (!selectedPlatform) return;
+    if (!selectedPlatform || isProcessing) return;
 
     setIsProcessing(true);
+    setError(null);
     try {
       await onExport(selectedPlatform.id, settings);
+    } catch (err) {
+      // Without this the rejection escapes as an unhandled promise rejection.
+      setError(err instanceof Error ? err.message : 'Export failed. Please try again.');
     } finally {
       setIsProcessing(false);
     }
@@ -133,6 +190,12 @@ export const SocialMediaExport: React.FC<SocialMediaExportProps> = ({
     return duration <= platform.maxDuration && fileSize <= platform.maxSize * 1024 * 1024;
   };
 
+  const availableResolutions = resolutionOptions(settings.aspectRatio);
+  const currentResolution = `${settings.resolution.width}x${settings.resolution.height}`;
+  const hasCurrentResolution = availableResolutions.some(
+    (option) => `${option.width}x${option.height}` === currentResolution
+  );
+
   return (
     <div className="space-y-6">
       {/* Platform Selection */}
@@ -140,7 +203,7 @@ export const SocialMediaExport: React.FC<SocialMediaExportProps> = ({
         {platforms.map((platform) => {
           const compatible = isCompatible(platform);
           const Icon = platform.icon;
-          
+
           return (
             <Tooltip
               key={platform.id}
@@ -150,8 +213,9 @@ export const SocialMediaExport: React.FC<SocialMediaExportProps> = ({
                 onClick={() => {
                   setSelectedPlatform(platform);
                   setSettings(platform.recommendedSettings);
+                  setError(null);
                 }}
-                disabled={!compatible}
+                disabled={!compatible || isProcessing}
                 className={`p-4 rounded-lg border text-left transition-all ${
                   selectedPlatform?.id === platform.id
                     ? 'border-[#E44E51] bg-[#E44E51]/5'
@@ -201,16 +265,22 @@ export const SocialMediaExport: React.FC<SocialMediaExportProps> = ({
                 Resolution
               </label>
               <select
-                value={`${settings.resolution.width}x${settings.resolution.height}`}
+                value={hasCurrentResolution ? currentResolution : ''}
                 onChange={(e) => {
                   const [width, height] = e.target.value.split('x').map(Number);
+                  if (!Number.isFinite(width) || !Number.isFinite(height)) return;
                   setSettings({ ...settings, resolution: { width, height } });
                 }}
                 className="w-full rounded-lg border-gray-300"
               >
-                <option value="1920x1080">1080p (1920x1080)</option>
-                <option value="1280x720">720p (1280x720)</option>
-                <option value="854x480">480p (854x480)</option>
+                {!hasCurrentResolution && (
+                  <option value="">{currentResolution} (custom)</option>
+                )}
+                {availableResolutions.map((option) => (
+                  <option key={option.label} value={`${option.width}x${option.height}`}>
+                    {option.label}
+                  </option>
+                ))}
               </select>
             </div>
             <div>
@@ -219,9 +289,9 @@ export const SocialMediaExport: React.FC<SocialMediaExportProps> = ({
               </label>
               <select
                 value={settings.fps}
-                onChange={(e) => setSettings({ 
-                  ...settings, 
-                  fps: parseInt(e.target.value) 
+                onChange={(e) => setSettings({
+                  ...settings,
+                  fps: parseInt(e.target.value, 10) || settings.fps
                 })}
                 className="w-full rounded-lg border-gray-300"
               >
@@ -232,6 +302,42 @@ export const SocialMediaExport: React.FC<SocialMediaExportProps> = ({
             </div>
           </div>
 
+          {showAdvanced && (
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Video Bitrate (kbps)
+                </label>
+                <input
+                  type="number"
+                  min={500}
+                  max={50000}
+                  step={500}
+                  value={settings.bitrate}
+                  onChange={(e) => {
+                    const value = parseInt(e.target.value, 10);
+                    setSettings({
+                      ...settings,
+                      bitrate: Number.isFinite(value) ? Math.min(50000, Math.max(500, value)) : settings.bitrate
+                    });
+                  }}
+                  className="w-full rounded-lg border-gray-300"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Aspect Ratio
+                </label>
+                <input
+                  type="text"
+                  value={settings.aspectRatio}
+                  readOnly
+                  className="w-full rounded-lg border-gray-300 bg-gray-50 text-gray-500"
+                />
+              </div>
+            </div>
+          )}
+
           {/* Platform Requirements */}
           <div className="p-4 bg-blue-50 rounded-lg">
             <h5 className="text-sm font-medium text-blue-900 mb-2 flex items-center">
@@ -239,12 +345,19 @@ export const SocialMediaExport: React.FC<SocialMediaExportProps> = ({
               {selectedPlatform.name} Requirements
             </h5>
             <ul className="text-sm text-blue-800 space-y-1">
-              <li>• Maximum duration: {selectedPlatform.maxDuration / 60} minutes</li>
-              <li>• Maximum file size: {selectedPlatform.maxSize} GB</li>
+              <li>• Maximum duration: {formatDuration(selectedPlatform.maxDuration)}</li>
+              <li>• Maximum file size: {formatSize(selectedPlatform.maxSize)}</li>
               <li>• Recommended resolution: {selectedPlatform.recommendedSettings.resolution.width}x{selectedPlatform.recommendedSettings.resolution.height}</li>
               <li>• Recommended aspect ratio: {selectedPlatform.recommendedSettings.aspectRatio}</li>
             </ul>
           </div>
+
+          {error && (
+            <div className="p-3 bg-red-50 text-red-700 rounded-lg text-sm flex items-start space-x-2">
+              <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
 
           {/* Export Button */}
           <button

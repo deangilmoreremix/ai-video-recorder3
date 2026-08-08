@@ -9,13 +9,7 @@ import { VideoFrameInterpolation } from './VideoFrameInterpolation';
 import { ImageInpainting } from './ImageInpainting';
 import { AIFeatureSelector } from './AIFeatureSelector';
 import { AIProcessingOverlay } from './AIProcessingOverlay';
-import { 
-  Brain, X, Grid, Sliders, Eye, 
-  Camera, Wand2, Layout, Mic, Smile, 
-  Palette, Gauge, CloudFog, Monitor, 
-  Film, Sparkles, ArrowUp, Maximize,
-  Send, Trash, HandMetal, Video, Filter
-} from 'lucide-react';
+import { Brain, X, Grid, Sliders, Camera, Wand2, Mic, Smile, Palette, Gauge, CloudFog, Monitor, Film, Sparkles, ArrowUp, Maximize, Send, Trash, HandMetal, Filter, Scan, Layers, Focus, Wind } from 'lucide-react';
 import { AIFeatureGrid } from './AIFeatureGrid';
 import { useAIFeatures } from '../../hooks/useAIFeatures';
 
@@ -40,7 +34,6 @@ export const AIVideoFeatures: React.FC<AIVideoFeaturesProps> = ({
   const { 
     features, 
     toggleFeature, 
-    updateFeatureSettings, 
     processFrame,
     isModelsLoaded,
     processingQuality,
@@ -269,7 +262,6 @@ export const AIVideoFeatures: React.FC<AIVideoFeaturesProps> = ({
           <AIFeatureSelector
             onFeatureSelect={handleFeatureSelect}
             activeFeature={activeFeature}
-            videoRef={videoRef}
             featureIcons={featureIcons}
           />
         </div>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Menu, X, ChevronDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -39,15 +39,17 @@ const Navbar = () => {
   }, [isMenuOpen]);
   
   useEffect(() => {
-    // Close the mobile menu when route changes
+    // Close the mobile menu and any open submenu when the route changes
     setIsMenuOpen(false);
+    setIsSubmenuOpen(false);
   }, [location]);
 
-  // Handle click outside to close submenu
+  // Handle click outside / Escape to close submenu
   useEffect(() => {
+    if (!isSubmenuOpen) return;
+
     const handleClickOutside = (event: MouseEvent) => {
       if (
-        isSubmenuOpen &&
         submenuRef.current &&
         !submenuRef.current.contains(event.target as Node) &&
         submenuButtonRef.current &&
@@ -57,9 +59,18 @@ const Navbar = () => {
       }
     };
 
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsSubmenuOpen(false);
+        submenuButtonRef.current?.focus();
+      }
+    };
+
     document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
     };
   }, [isSubmenuOpen]);
 
@@ -79,25 +90,30 @@ const Navbar = () => {
             <div className="flex items-center space-x-8">
               <Link
                 to="/"
-                className={`${isScrolled ? 'text-gray-900' : 'text-gray-900'} hover:text-[#E44E51] px-3 py-2 text-sm font-medium transition-colors duration-200`}
+                className={`${isScrolled ? 'text-gray-900' : 'text-white'} hover:text-[#E44E51] px-3 py-2 text-sm font-medium transition-colors duration-200`}
               >
                 Home
               </Link>
               
-              <div className="relative group">
+              <div className="relative group" onMouseLeave={() => setIsSubmenuOpen(false)}>
                 <button
                   ref={submenuButtonRef}
+                  type="button"
+                  aria-expanded={isSubmenuOpen}
+                  aria-haspopup="true"
+                  aria-controls="features-submenu"
                   onClick={() => setIsSubmenuOpen(!isSubmenuOpen)}
                   onMouseEnter={() => setIsSubmenuOpen(true)}
-                  className={`${isScrolled ? 'text-gray-900' : 'text-gray-900'} hover:text-[#E44E51] px-3 py-2 text-sm font-medium flex items-center transition-colors duration-200`}
+                  className={`${isScrolled ? 'text-gray-900' : 'text-white'} hover:text-[#E44E51] px-3 py-2 text-sm font-medium flex items-center transition-colors duration-200`}
                 >
                   Features
-                  <ChevronDown className={`ml-1 w-4 h-4 transition-transform duration-200 ${isSubmenuOpen ? 'rotate-180' : ''}`} />
+                  <ChevronDown className={`ml-1 w-4 h-4 transition-transform duration-200 ${isSubmenuOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
                 </button>
                 
                 {isSubmenuOpen && (
                   <div
                     ref={submenuRef}
+                    id="features-submenu"
                     onMouseEnter={() => setIsSubmenuOpen(true)}
                     onMouseLeave={() => setIsSubmenuOpen(false)}
                     className="absolute left-0 mt-1 w-56 bg-white rounded-md shadow-lg ring-1 ring-black ring-opacity-5 z-50"
@@ -125,14 +141,14 @@ const Navbar = () => {
               
               <Link
                 to="/pricing"
-                className={`${isScrolled ? 'text-gray-900' : 'text-gray-900'} hover:text-[#E44E51] px-3 py-2 text-sm font-medium transition-colors duration-200`}
+                className={`${isScrolled ? 'text-gray-900' : 'text-white'} hover:text-[#E44E51] px-3 py-2 text-sm font-medium transition-colors duration-200`}
               >
                 Pricing
               </Link>
               
               <Link
                 to="/recordings"
-                className={`${isScrolled ? 'text-gray-900' : 'text-gray-900'} hover:text-[#E44E51] px-3 py-2 text-sm font-medium transition-colors duration-200`}
+                className={`${isScrolled ? 'text-gray-900' : 'text-white'} hover:text-[#E44E51] px-3 py-2 text-sm font-medium transition-colors duration-200`}
               >
                 My Recordings
               </Link>
@@ -142,11 +158,7 @@ const Navbar = () => {
           <div className="hidden md:block">
             <Link
               to="/app"
-              className={`rounded px-4 py-2 text-sm font-medium ${
-                isScrolled 
-                  ? 'bg-[#E44E51] text-white hover:bg-[#D43B3E]' 
-                  : 'bg-[#E44E51] text-white hover:bg-[#D43B3E]'
-              } transition-colors duration-200`}
+              className="rounded px-4 py-2 text-sm font-medium bg-[#E44E51] text-white hover:bg-[#D43B3E] transition-colors duration-200"
             >
               Try Free
             </Link>
@@ -154,10 +166,13 @@ const Navbar = () => {
           
           <div className="-mr-2 flex md:hidden">
             <button
+              type="button"
               onClick={() => setIsMenuOpen(!isMenuOpen)}
-              className={`inline-flex items-center justify-center p-2 rounded-md ${isScrolled ? 'text-gray-900' : 'text-gray-900'} hover:text-[#E44E51] focus:outline-none`}
+              aria-expanded={isMenuOpen}
+              aria-controls="mobile-menu"
+              className={`inline-flex items-center justify-center p-2 rounded-md ${isScrolled ? 'text-gray-900' : 'text-white'} hover:text-[#E44E51] focus:outline-none focus:ring-2 focus:ring-[#E44E51]`}
             >
-              <span className="sr-only">Open main menu</span>
+              <span className="sr-only">{isMenuOpen ? 'Close main menu' : 'Open main menu'}</span>
               {isMenuOpen ? (
                 <X className="block h-6 w-6" aria-hidden="true" />
               ) : (
@@ -172,6 +187,7 @@ const Navbar = () => {
       <AnimatePresence>
         {isMenuOpen && (
           <motion.div
+            id="mobile-menu"
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
@@ -187,16 +203,20 @@ const Navbar = () => {
               
               <div>
                 <button
+                  type="button"
                   onClick={() => setIsSubmenuOpen(!isSubmenuOpen)}
+                  aria-expanded={isSubmenuOpen}
+                  aria-controls="mobile-features-submenu"
                   className="flex justify-between items-center w-full px-3 py-2 rounded-md text-base font-medium text-gray-900 hover:bg-gray-50"
                 >
                   <span>Features</span>
-                  <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${isSubmenuOpen ? 'rotate-180' : ''}`} />
+                  <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${isSubmenuOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
                 </button>
                 
                 <AnimatePresence>
                   {isSubmenuOpen && (
                     <motion.div
+                      id="mobile-features-submenu"
                       initial={{ opacity: 0, height: 0 }}
                       animate={{ opacity: 1, height: 'auto' }}
                       exit={{ opacity: 0, height: 0 }}

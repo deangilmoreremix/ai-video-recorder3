@@ -1,15 +1,19 @@
 import React, { useState, useRef, useEffect } from 'react';
-import {
-  Download, Loader, Video, Settings, Youtube, Instagram,
-  Twitter, Facebook, Linkedin, Globe, ChevronRight, 
-  X, Play, Check, Camera, Wand2, Film, ArrowRight
-} from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { AlertCircle, Download, Loader, Video, Youtube, Instagram, Twitter, Facebook, Linkedin, Globe, X, Check, Camera, Film, ArrowRight } from 'lucide-react';
+import { motion } from 'framer-motion';
 import JSZip from 'jszip';
 
 // Import the thumbnail generator and GIF creator
 import { ThumbnailGenerator } from './ThumbnailGenerator';
 import { AnimatedGifCreator } from './AnimatedGifCreator';
+import {
+  buildFileName,
+  downloadBlob,
+  getExtensionForBlob,
+  isCancellation,
+  processVideo,
+  toError
+} from './VideoProcessing';
 
 interface EnhancedExportDialogProps {
   isOpen: boolean;
@@ -25,7 +29,8 @@ const EnhancedExportDialog: React.FC<EnhancedExportDialogProps> = ({
   const [activeTab, setActiveTab] = useState('video');
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [exportResult, setExportResult] = useState<{ url: string; blob: Blob } | null>(null);
+  const [exportResult, setExportResult] = useState<{ url: string; blob: Blob; fileName: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
   
   // Video settings
   const [videoSettings, setVideoSettings] = useState({
@@ -39,6 +44,7 @@ const EnhancedExportDialog: React.FC<EnhancedExportDialogProps> = ({
   
   // Refs
   const videoRef = useRef<HTMLVideoElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
   
   const platforms = [
     { id: 'youtube', name: 'YouTube', icon: Youtube },
@@ -62,7 +68,7 @@ const EnhancedExportDialog: React.FC<EnhancedExportDialogProps> = ({
     }
   }, [videoBlob]);
   
-  // Clean up export result URL when the component unmounts
+  // Release the previous result URL whenever it is replaced or unmounted
   useEffect(() => {
     return () => {
       if (exportResult) {
@@ -70,31 +76,57 @@ const EnhancedExportDialog: React.FC<EnhancedExportDialogProps> = ({
       }
     };
   }, [exportResult]);
+
+  // Never leave a conversion running after the dialog is closed
+  useEffect(() => () => abortRef.current?.abort(), []);
   
+  const handleCancel = () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setIsProcessing(false);
+    setProgress(0);
+  };
+
   const handleExportVideo = async () => {
-    if (!videoBlob) return;
-    
+    if (!videoBlob || isProcessing) return;
+
+    const controller = new AbortController();
+    abortRef.current = controller;
     setIsProcessing(true);
     setProgress(0);
-    
+    setError(null);
+
     try {
-      // This would be replaced with real video processing
-      // For now, we'll simulate the processing
-      for (let i = 0; i <= 100; i += 10) {
-        setProgress(i);
-        await new Promise(resolve => setTimeout(resolve, 200));
-      }
-      
-      // Create a download URL
-      const url = URL.createObjectURL(videoBlob);
-      setExportResult({ url, blob: videoBlob });
-      
-    } catch (error) {
-      console.error('Export failed:', error);
+      const processed = await processVideo(
+        videoBlob,
+        {
+          format: videoSettings.format,
+          codec: videoSettings.codec,
+          resolution: videoSettings.resolution,
+          fps: videoSettings.fps,
+          quality: videoSettings.quality
+        },
+        setProgress,
+        controller.signal
+      );
+
+      setExportResult({
+        url: URL.createObjectURL(processed),
+        blob: processed,
+        fileName: buildFileName('exported-video', videoSettings.format)
+      });
+    } catch (err) {
+      if (!isCancellation(err)) setError(toError(err).message);
     } finally {
+      abortRef.current = null;
       setIsProcessing(false);
-      setProgress(100);
+      setProgress(0);
     }
+  };
+
+  const handleDownloadOriginal = () => {
+    if (!videoBlob) return;
+    downloadBlob(videoBlob, buildFileName('recording', getExtensionForBlob(videoBlob)));
   };
   
   const createDownloadPackage = async () => {
@@ -108,7 +140,7 @@ const EnhancedExportDialog: React.FC<EnhancedExportDialogProps> = ({
       const zip = new JSZip();
       
       // Add the main video
-      zip.file(`video.${videoSettings.format}`, exportResult.blob);
+      zip.file(exportResult.fileName, exportResult.blob);
       
       // Create a README file with info
       const readme = `Video Export Information:
@@ -125,18 +157,9 @@ Created with AI Screen Recorder
       // Generate the ZIP file
       const zipBlob = await zip.generateAsync({ type: "blob" });
       
-      // Create a download link
-      const url = URL.createObjectURL(zipBlob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `video_export_package.zip`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      
-    } catch (error) {
-      console.error('Creating download package failed:', error);
+      downloadBlob(zipBlob, 'video_export_package.zip');
+    } catch (err) {
+      setError(toError(err).message);
     } finally {
       setIsProcessing(false);
       setProgress(0);
@@ -145,16 +168,23 @@ Created with AI Screen Recorder
   
   // Handle GIF generation completion
   const handleGifGenerated = (gif: Blob) => {
-    const url = URL.createObjectURL(gif);
-    setExportResult({ url, blob: gif });
+    setExportResult({
+      url: URL.createObjectURL(gif),
+      blob: gif,
+      fileName: buildFileName('animation', 'gif')
+    });
     setIsProcessing(false);
   };
   
   // Handle thumbnail generation completion
   const handleThumbnailsGenerated = (thumbnails: Blob[]) => {
-    if (thumbnails.length > 0) {
-      const url = URL.createObjectURL(thumbnails[0]);
-      setExportResult({ url, blob: thumbnails[0] });
+    const first = thumbnails[0];
+    if (first) {
+      setExportResult({
+        url: URL.createObjectURL(first),
+        blob: first,
+        fileName: buildFileName('thumbnail', getExtensionForBlob(first, 'jpg'))
+      });
     }
     setIsProcessing(false);
   };
@@ -186,6 +216,20 @@ Created with AI Screen Recorder
         </div>
 
         <div className="p-6">
+          {error && (
+            <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-lg text-sm flex items-start space-x-2">
+              <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+              <div className="space-y-2">
+                <p>{error}</p>
+                {videoBlob && (
+                  <button onClick={handleDownloadOriginal} className="underline hover:no-underline">
+                    Download the original file instead
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Tabs */}
           <div className="flex border-b overflow-x-auto">
             <button
@@ -249,7 +293,7 @@ Created with AI Screen Recorder
                       <div className="grid grid-cols-2 gap-2">
                         <a
                           href={exportResult.url}
-                          download={`exported-video.${videoSettings.format}`}
+                          download={exportResult.fileName}
                           className="flex items-center justify-center px-4 py-2 bg-[#E44E51] text-white rounded-lg hover:bg-[#D43B3E] transition-colors"
                         >
                           <Download className="w-4 h-4 mr-2" />
@@ -265,23 +309,34 @@ Created with AI Screen Recorder
                       </div>
                     </div>
                   ) : (
-                    <button
-                      onClick={handleExportVideo}
-                      disabled={isProcessing || !videoBlob}
-                      className="mt-4 w-full flex items-center justify-center px-4 py-2 bg-[#E44E51] text-white rounded-lg hover:bg-[#D43B3E] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                    >
-                      {isProcessing ? (
-                        <>
-                          <Loader className="w-4 h-4 animate-spin mr-2" />
-                          <span>Processing... {progress}%</span>
-                        </>
-                      ) : (
-                        <>
-                          <Download className="w-4 h-4 mr-2" />
-                          <span>Export Video</span>
-                        </>
+                    <div className="mt-4 space-y-2">
+                      <button
+                        onClick={handleExportVideo}
+                        disabled={isProcessing || !videoBlob}
+                        className="w-full flex items-center justify-center px-4 py-2 bg-[#E44E51] text-white rounded-lg hover:bg-[#D43B3E] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        {isProcessing ? (
+                          <>
+                            <Loader className="w-4 h-4 animate-spin mr-2" />
+                            <span>Processing... {progress}%</span>
+                          </>
+                        ) : (
+                          <>
+                            <Download className="w-4 h-4 mr-2" />
+                            <span>Export Video</span>
+                          </>
+                        )}
+                      </button>
+
+                      {isProcessing && (
+                        <button
+                          onClick={handleCancel}
+                          className="w-full px-4 py-2 text-sm text-gray-600 hover:text-gray-900 border border-gray-200 rounded-lg"
+                        >
+                          Cancel export
+                        </button>
                       )}
-                    </button>
+                    </div>
                   )}
                 </div>
                 
@@ -293,8 +348,8 @@ Created with AI Screen Recorder
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Export Format
                       </label>
-                      <div className="grid grid-cols-4 gap-3">
-                        {['mp4', 'webm', 'mov', 'avi'].map((format) => (
+                      <div className="grid grid-cols-3 gap-3">
+                        {['mp4', 'webm', 'mov'].map((format) => (
                           <button
                             key={format}
                             onClick={() => setVideoSettings({ ...videoSettings, format })}

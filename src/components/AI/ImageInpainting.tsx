@@ -1,8 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { 
-  Eraser, Wand2, RefreshCw, Settings, Check, X,
-  RotateCcw, Trash2, Download, Save
-} from 'lucide-react';
+import { Eraser, Wand2, RefreshCw, Settings, X, Save } from 'lucide-react';
 
 interface ImageInpaintingProps {
   videoRef: React.RefObject<HTMLVideoElement>;
@@ -86,6 +83,7 @@ export const ImageInpainting: React.FC<ImageInpaintingProps> = ({
         setIsPaused(false);
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, videoRef]);
 
   // Drawing handlers

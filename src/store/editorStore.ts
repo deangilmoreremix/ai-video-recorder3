@@ -32,7 +32,7 @@ interface EditorState {
   updateEndCard: (id: string, updates: Partial<EndCard>) => void;
 }
 
-interface VideoClip {
+export interface VideoClip {
   id: string;
   url: string;
   startTime: number;
@@ -40,26 +40,26 @@ interface VideoClip {
   type: 'video' | 'audio';
 }
 
-interface Chapter {
+export interface Chapter {
   id: string;
   title: string;
   time: number;
 }
 
-interface Caption {
+export interface Caption {
   id: string;
   text: string;
   startTime: number;
   endTime: number;
 }
 
-interface TimeRange {
+export interface TimeRange {
   id: string;
   startTime: number;
   endTime: number;
 }
 
-interface EndCard {
+export interface EndCard {
   id: string;
   type: 'video' | 'playlist' | 'link';
   title: string;
@@ -80,16 +80,19 @@ export const useEditorStore = create<EditorState>((set) => ({
   silentSegments: [],
   endCards: [],
 
-  setCurrentTime: (time) => set({ currentTime: time }),
-  setDuration: (duration) => set({ duration }),
+  setCurrentTime: (time) => set((state) => ({
+    currentTime: Math.max(0, state.duration > 0 ? Math.min(state.duration, time) : time)
+  })),
+  setDuration: (duration) => set({ duration: Math.max(0, duration) }),
   setIsPlaying: (isPlaying) => set({ isPlaying }),
-  setVolume: (volume) => set({ volume }),
+  setVolume: (volume) => set({ volume: Math.max(0, Math.min(1, volume)) }),
 
   addClip: (clip) => set((state) => ({ 
     clips: [...state.clips, clip] 
   })),
   removeClip: (id) => set((state) => ({ 
-    clips: state.clips.filter((clip) => clip.id !== id) 
+    clips: state.clips.filter((clip) => clip.id !== id),
+    selectedClipId: state.selectedClipId === id ? null : state.selectedClipId
   })),
   updateClip: (id, updates) => set((state) => ({
     clips: state.clips.map((clip) => 

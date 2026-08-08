@@ -1,10 +1,6 @@
-import React, { useState } from 'react';
-import { motion, AnimatePresence, MotionValue, useTransform, useMotionValue, useSpring } from 'framer-motion';
-import { 
-  Check, ChevronRight, ChevronDown, X, Star, ArrowRight, 
-  Shield, Clock, Zap, Download, Users, Layout, Video, 
-  MessageSquare, LifeBuoy, Lightbulb, PlusCircle, MinusCircle
-} from 'lucide-react';
+import { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Check, ChevronDown, X, Star, ArrowRight, Shield, Zap, Users, Video, MessageSquare, PlusCircle, MinusCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import Navbar from '../components/landing/Navbar';
 import Footer from '../components/landing/Footer';
@@ -18,8 +14,6 @@ const PricingPage = () => {
   const toggleFaq = (index: number) => {
     setExpandedFaq(expandedFaq === index ? null : index);
   };
-  
-  const springConfig = { stiffness: 100, damping: 30, restDelta: 0.001 };
 
   const plans = [
     {
@@ -126,21 +120,6 @@ const PricingPage = () => {
   ];
 
   // Animation variants
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    visible: {
-      opacity: 1,
-      transition: {
-        staggerChildren: 0.1
-      }
-    }
-  };
-  
-  const itemVariants = {
-    hidden: { opacity: 0, y: 20 },
-    visible: { opacity: 1, y: 0 }
-  };
-  
   const planCardVariants = {
     initial: { y: 50, opacity: 0 },
     animate: { y: 0, opacity: 1 },

@@ -1,10 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { 
-  Video, Search, Filter, Clock, Calendar, Trash2, Edit2, Download, 
-  Play, Grid, List, ChevronDown, MoreHorizontal, Star, StarOff, 
-  Copy, Share2, Folder, Plus, Film, ArrowUp, ArrowDown, Eye, Settings
-} from 'lucide-react';
+import { Search, Filter, Clock, Calendar, Trash2, Edit2, Download, Play, Grid, List, ChevronDown, MoreHorizontal, Star, StarOff, Folder, Plus, Film, ArrowUp, ArrowDown, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Tooltip } from '../components/ui/Tooltip';
 
@@ -747,6 +743,18 @@ const RecordingsLibraryPage = () => {
                 </div>
                 
                 <div className="flex space-x-3">
+                  <label className="sr-only" htmlFor="recording-folder">Move to folder</label>
+                  <select
+                    id="recording-folder"
+                    value={recordings.find(r => r.id === selectedRecording)?.folder ?? ''}
+                    onChange={(e) => assignToFolder(selectedRecording, e.target.value || null)}
+                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+                  >
+                    <option value="">Uncategorized</option>
+                    {folders.map(folder => (
+                      <option key={folder} value={folder}>{folder}</option>
+                    ))}
+                  </select>
                   <button 
                     className="px-4 py-2 bg-gray-100 text-gray-800 rounded-lg hover:bg-gray-200 flex items-center"
                     onClick={() => setSelectedRecording(null)}

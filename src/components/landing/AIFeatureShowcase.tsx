@@ -4,6 +4,7 @@ import { Scan, Layers, Wand2, Camera } from 'lucide-react';
 
 const AIFeatureShowcase: React.FC = () => {
   const [activeFeature, setActiveFeature] = useState('face-detection');
+  const [failedVideos, setFailedVideos] = useState<string[]>([]);
   
   const features = [
     {
@@ -40,22 +41,13 @@ const AIFeatureShowcase: React.FC = () => {
     }
   ];
   
-  const activeFeatureData = features.find(f => f.id === activeFeature);
+  const activeFeatureData = features.find(f => f.id === activeFeature) || features[0];
+  const activeVideoFailed = failedVideos.includes(activeFeatureData.id);
 
-  const handleVideoError = (e: React.SyntheticEvent<HTMLVideoElement, Event>, fallbackImage: string) => {
-    const video = e.currentTarget;
-    // Hide the video element
-    video.style.display = 'none';
-    
-    // Create and insert a fallback image
-    const parent = video.parentElement;
-    if (parent) {
-      const img = document.createElement('img');
-      img.src = fallbackImage;
-      img.className = 'w-full h-full object-cover';
-      img.alt = 'Feature preview';
-      parent.insertBefore(img, video);
-    }
+  // Render the fallback image through React instead of injecting DOM nodes
+  // into a container that React owns.
+  const handleVideoError = (featureId: string) => {
+    setFailedVideos(prev => (prev.includes(featureId) ? prev : [...prev, featureId]));
   };
 
   return (
@@ -117,22 +109,32 @@ const AIFeatureShowcase: React.FC = () => {
                   transition={{ duration: 0.5 }}
                   className="absolute inset-0"
                 >
-                  <video 
-                    className="w-full h-full object-cover"
-                    src={activeFeatureData?.video}
-                    autoPlay
-                    loop
-                    muted
-                    onError={(e) => handleVideoError(e, activeFeatureData?.fallbackImage || '')}
-                    poster={activeFeatureData?.fallbackImage}
-                  ></video>
+                  {activeVideoFailed ? (
+                    <img
+                      className="w-full h-full object-cover"
+                      src={activeFeatureData.fallbackImage}
+                      alt={`${activeFeatureData.title} preview`}
+                    />
+                  ) : (
+                    <video 
+                      className="w-full h-full object-cover"
+                      src={activeFeatureData.video}
+                      autoPlay
+                      loop
+                      muted
+                      playsInline
+                      preload="metadata"
+                      onError={() => handleVideoError(activeFeatureData.id)}
+                      poster={activeFeatureData.fallbackImage}
+                    ></video>
+                  )}
                   
                   {/* Overlay to show the effect being applied */}
                   <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent">
                     <div className="absolute bottom-4 left-4">
-                      <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-[#E44E51]">
-                        {activeFeatureData && <activeFeatureData.icon className="w-4 h-4 mr-1" />}
-                        {activeFeatureData?.title}
+                      <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-[#E44E51] text-white">
+                        <activeFeatureData.icon className="w-4 h-4 mr-1" aria-hidden="true" />
+                        {activeFeatureData.title}
                       </span>
                       <div className="mt-2 text-xs text-white/80">AI processing applied in real-time</div>
                     </div>
@@ -183,20 +185,24 @@ const AIFeatureShowcase: React.FC = () => {
               {features.map((feature) => (
                 <button
                   key={feature.id}
+                  type="button"
                   onClick={() => setActiveFeature(feature.id)}
+                  aria-pressed={activeFeature === feature.id}
+                  aria-label={`Show ${feature.title} demo`}
                   className={`aspect-video rounded-lg overflow-hidden relative ${
                     activeFeature === feature.id ? 'ring-4 ring-[#E44E51]' : 'ring-1 ring-white/10'
                   }`}
                 >
                   <img 
                     src={feature.fallbackImage}
-                    alt={feature.title}
+                    alt=""
+                    loading="lazy"
                     className="w-full h-full object-cover"
                   />
                   <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
                     <feature.icon className={`w-8 h-8 ${
                       activeFeature === feature.id ? 'text-[#E44E51]' : 'text-white/70'
-                    }`} />
+                    }`} aria-hidden="true" />
                   </div>
                 </button>
               ))}

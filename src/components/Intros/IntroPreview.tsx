@@ -1,8 +1,5 @@
 import React, { useState } from 'react';
-import { 
-  Play, Pause, Volume2, VolumeX, Maximize2, Minimize2,
-  Download, Share2, X, Edit2, Clock, Settings
-} from 'lucide-react';
+import { Play, Pause, Volume2, VolumeX, Maximize2, Minimize2, Download, Share2, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useIntroStore } from '../../store/introStore';
 

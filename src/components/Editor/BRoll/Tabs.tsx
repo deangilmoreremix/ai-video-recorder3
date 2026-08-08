@@ -24,7 +24,7 @@ interface TabsContentProps {
   children: React.ReactNode;
 }
 
-export const Tabs: React.FC<TabsProps> = ({ value, onValueChange, children }) => {
+export const Tabs: React.FC<TabsProps> = ({ value, children }) => {
   return (
     <div data-current-tab={value} className="tabs-root">
       {children}

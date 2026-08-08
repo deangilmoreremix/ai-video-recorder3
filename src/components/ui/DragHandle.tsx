@@ -4,11 +4,14 @@ import { GripVertical } from 'lucide-react';
 
 interface DragHandleProps {
   className?: string;
+  'aria-label'?: string;
 }
 
-export const DragHandle: React.FC<DragHandleProps> = ({ className }) => {
+export const DragHandle: React.FC<DragHandleProps> = ({ className, 'aria-label': ariaLabel }) => {
   return (
     <div
+      aria-hidden={ariaLabel ? undefined : true}
+      aria-label={ariaLabel}
       className={cn(
         "cursor-move touch-none select-none",
         "p-1 rounded hover:bg-gray-100 text-gray-400",

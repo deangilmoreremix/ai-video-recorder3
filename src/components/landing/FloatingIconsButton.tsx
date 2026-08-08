@@ -1,9 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  Camera, Brain, Film, Sparkles, Scissors, 
-  Type, Plus, X, Maximize2, Minimize2 
-} from 'lucide-react';
+import { Camera, Brain, Film, Sparkles, Scissors, Plus, X, Maximize2, Minimize2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 interface FloatingIconsButtonProps {
@@ -16,6 +13,18 @@ const FloatingIconsButton: React.FC<FloatingIconsButtonProps> = ({ className = '
 
   const toggleOpen = () => setIsOpen(!isOpen);
   const toggleExpanded = () => setIsExpanded(!isExpanded);
+
+  // Allow closing the shortcut menu with Escape
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setIsOpen(false);
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen]);
 
   const buttonItems = [
     { 
@@ -55,15 +64,17 @@ const FloatingIconsButton: React.FC<FloatingIconsButtonProps> = ({ className = '
       {/* Expanded View Toggle */}
       {isOpen && (
         <motion.button
+          type="button"
           initial={{ opacity: 0, scale: 0.5 }}
           animate={{ opacity: 1, scale: 1 }}
           className="absolute bottom-0 right-24 p-2 rounded-full bg-white shadow-lg text-gray-700 hover:text-gray-900"
           onClick={toggleExpanded}
+          aria-label={isExpanded ? 'Collapse feature shortcut labels' : 'Expand feature shortcut labels'}
         >
           {isExpanded ? (
-            <Minimize2 className="w-5 h-5" />
+            <Minimize2 className="w-5 h-5" aria-hidden="true" />
           ) : (
-            <Maximize2 className="w-5 h-5" />
+            <Maximize2 className="w-5 h-5" aria-hidden="true" />
           )}
         </motion.button>
       )}
@@ -100,10 +111,13 @@ const FloatingIconsButton: React.FC<FloatingIconsButtonProps> = ({ className = '
                 >
                   <Link
                     to={item.link}
+                    aria-label={item.label}
+                    title={item.label}
+                    onClick={() => setIsOpen(false)}
                     className={`${item.color} text-white p-3 rounded-full shadow-lg flex items-center space-x-2 
                       ${isExpanded ? 'pl-3 pr-4' : 'w-12 h-12 justify-center'}`}
                   >
-                    <Icon className={`w-6 h-6 ${isExpanded ? '' : 'mr-0'}`} />
+                    <Icon className={`w-6 h-6 ${isExpanded ? '' : 'mr-0'}`} aria-hidden="true" />
                     {isExpanded && (
                       <motion.span
                         initial={{ opacity: 0, width: 0 }}
@@ -124,15 +138,18 @@ const FloatingIconsButton: React.FC<FloatingIconsButtonProps> = ({ className = '
       
       {/* Main Toggle Button */}
       <motion.button
+        type="button"
         className="relative z-10 w-16 h-16 rounded-full bg-[#E44E51] text-white shadow-lg hover:bg-[#D43B3E] flex items-center justify-center"
         whileHover={{ scale: 1.05 }}
         whileTap={{ scale: 0.95 }}
         onClick={toggleOpen}
+        aria-expanded={isOpen}
+        aria-label={isOpen ? 'Close feature shortcuts' : 'Open feature shortcuts'}
       >
         {isOpen ? (
-          <X className="w-8 h-8" />
+          <X className="w-8 h-8" aria-hidden="true" />
         ) : (
-          <Plus className="w-8 h-8" />
+          <Plus className="w-8 h-8" aria-hidden="true" />
         )}
       </motion.button>
     </div>
