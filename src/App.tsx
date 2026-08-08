@@ -1,24 +1,28 @@
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Loader } from 'lucide-react';
-
-// Landing pages
-import LandingPage from './pages/LandingPage';
-import AIFeaturesPage from './pages/features/AIFeaturesPage';
-import VideoRecorderPage from './pages/features/VideoRecorderPage';
-import EditorPage from './pages/features/EditorPage';
-import ExportPage from './pages/features/ExportPage';
-import AnimationPage from './pages/features/AnimationPage';
-import PricingPage from './pages/PricingPage';
-import RecordingsLibraryPage from './pages/RecordingsLibraryPage';
-
-// App Page
-import AppMain from './pages/AppMain';
-
-// Auth
-import AuthModal from './components/Auth/AuthModal';
 import { getSession, onAuthStateChange, signOut } from './utils/auth';
 import { isSupabaseConfigured } from './utils/supabaseClient';
+
+// Every route target is code split so the initial entry chunk only carries the
+// router shell. All of these modules are default exports, so the dynamic import
+// can be handed to React.lazy directly.
+
+// Landing pages
+const LandingPage = lazy(() => import('./pages/LandingPage'));
+const AIFeaturesPage = lazy(() => import('./pages/features/AIFeaturesPage'));
+const VideoRecorderPage = lazy(() => import('./pages/features/VideoRecorderPage'));
+const EditorPage = lazy(() => import('./pages/features/EditorPage'));
+const ExportPage = lazy(() => import('./pages/features/ExportPage'));
+const AnimationPage = lazy(() => import('./pages/features/AnimationPage'));
+const PricingPage = lazy(() => import('./pages/PricingPage'));
+const RecordingsLibraryPage = lazy(() => import('./pages/RecordingsLibraryPage'));
+
+// App Page
+const AppMain = lazy(() => import('./pages/AppMain'));
+
+// Auth
+const AuthModal = lazy(() => import('./components/Auth/AuthModal'));
 
 interface AuthStatus {
   isLoading: boolean;
@@ -66,6 +70,9 @@ const AuthLoading: React.FC<{ message?: string }> = ({ message = 'Checking your 
     <span className="ml-2 text-gray-600">{message}</span>
   </div>
 );
+
+/** Shown while a lazily loaded route chunk is being fetched. */
+const RouteFallback = () => <AuthLoading message="Loading..." />;
 
 /** Only allow same-origin, non protocol-relative paths as a redirect target. */
 const safeRedirect = (value: unknown): string =>
@@ -129,41 +136,43 @@ function App() {
   const auth = useAuthStatus();
 
   return (
-    <Routes>
-      {/* Landing pages (public) */}
-      <Route path="/" element={<LandingPage />} />
-      <Route path="/features/ai" element={<AIFeaturesPage />} />
-      <Route path="/features/recorder" element={<VideoRecorderPage />} />
-      <Route path="/features/editor" element={<EditorPage />} />
-      <Route path="/features/export" element={<ExportPage />} />
-      <Route path="/features/animation" element={<AnimationPage />} />
-      <Route path="/pricing" element={<PricingPage />} />
+    <Suspense fallback={<RouteFallback />}>
+      <Routes>
+        {/* Landing pages (public) */}
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/features/ai" element={<AIFeaturesPage />} />
+        <Route path="/features/recorder" element={<VideoRecorderPage />} />
+        <Route path="/features/editor" element={<EditorPage />} />
+        <Route path="/features/export" element={<ExportPage />} />
+        <Route path="/features/animation" element={<AnimationPage />} />
+        <Route path="/pricing" element={<PricingPage />} />
 
-      {/* Auth */}
-      <Route path="/login" element={<LoginRoute auth={auth} />} />
-      <Route path="/logout" element={<LogoutRoute />} />
+        {/* Auth */}
+        <Route path="/login" element={<LoginRoute auth={auth} />} />
+        <Route path="/logout" element={<LogoutRoute />} />
 
-      {/* Protected pages */}
-      <Route
-        path="/recordings"
-        element={
-          <RequireAuth auth={auth}>
-            <RecordingsLibraryPage />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/app"
-        element={
-          <RequireAuth auth={auth}>
-            <AppMain />
-          </RequireAuth>
-        }
-      />
+        {/* Protected pages */}
+        <Route
+          path="/recordings"
+          element={
+            <RequireAuth auth={auth}>
+              <RecordingsLibraryPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/app"
+          element={
+            <RequireAuth auth={auth}>
+              <AppMain />
+            </RequireAuth>
+          }
+        />
 
-      {/* Unknown routes fall back to the landing page */}
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+        {/* Unknown routes fall back to the landing page */}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Suspense>
   );
 }
 
