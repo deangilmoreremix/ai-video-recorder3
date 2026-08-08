@@ -37,6 +37,22 @@ export const RECORDING_MIME_CANDIDATES = [
 ];
 
 /**
+ * mp4 recording is only available on some browsers (Safari, recent Chrome),
+ * so these are tried first when the user asks for mp4 and we still fall back
+ * to the webm list (vp9 → vp8 → webm) when none of them are supported.
+ */
+export const MP4_MIME_CANDIDATES = [
+  'video/mp4;codecs=h264,aac',
+  'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+  'video/mp4;codecs=avc1',
+  'video/mp4'
+];
+
+/** Candidate list for a user selected container format. */
+export const getMimeCandidates = (format: 'webm' | 'mp4' = 'webm'): string[] =>
+  format === 'mp4' ? [...MP4_MIME_CANDIDATES, ...RECORDING_MIME_CANDIDATES] : RECORDING_MIME_CANDIDATES;
+
+/**
  * Returns the first mimeType supported by this browser, or `undefined` when
  * none of the candidates are supported (the browser default is then used).
  */
@@ -58,13 +74,15 @@ export const pickSupportedMimeType = (
 
 /**
  * Creates a MediaRecorder using a supported mimeType, falling back to the
- * browser default when the negotiated options are rejected.
+ * browser default when the negotiated options are rejected. `candidates` lets
+ * the caller express a container preference (e.g. mp4 over webm).
  */
 export const createMediaRecorder = (
   stream: MediaStream,
-  options: Omit<MediaRecorderOptions, 'mimeType'> = {}
+  options: Omit<MediaRecorderOptions, 'mimeType'> = {},
+  candidates: string[] = RECORDING_MIME_CANDIDATES
 ): MediaRecorder => {
-  const mimeType = pickSupportedMimeType();
+  const mimeType = pickSupportedMimeType(candidates);
 
   try {
     return new MediaRecorder(stream, mimeType ? { ...options, mimeType } : options);

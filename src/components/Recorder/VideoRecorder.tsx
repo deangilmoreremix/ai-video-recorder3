@@ -5,6 +5,7 @@ import {
   createMediaRecorder,
   getMediaErrorMessage,
   getMediaSupportError,
+  getMimeCandidates,
   mixAudioTracks,
   MixedAudio
 } from '../../hooks/useVideoRecorder';
@@ -25,6 +26,32 @@ interface VideoDevice {
   deviceId: string;
   label: string;
 }
+
+type Resolution = '1080p' | '720p' | '480p' | '360p';
+type Quality = 'high' | 'medium' | 'low';
+type RecordingModeSetting = 'continuous' | 'timed' | 'segmented';
+type RecordingFormat = 'webm' | 'mp4';
+
+/** Frame sizes requested from the capture device for each resolution preset. */
+const RESOLUTION_PRESETS: Record<Resolution, { width: number; height: number }> = {
+  '1080p': { width: 1920, height: 1080 },
+  '720p': { width: 1280, height: 720 },
+  '480p': { width: 854, height: 480 },
+  '360p': { width: 640, height: 360 }
+};
+
+/** Quality presets, mapped to the MediaRecorder bitrate (bits per second). */
+const QUALITY_BITRATES: Record<Quality, number> = {
+  high: 8_000_000,
+  medium: 4_000_000,
+  low: 2_000_000
+};
+
+// "Timed" stops automatically after a fixed take. "Segmented" uses the same
+// auto-stop mechanism with a shorter chunk, so a long session is captured as
+// several short recordings instead of one huge file.
+const TIMED_DURATION_SECONDS = 60;
+const SEGMENT_DURATION_SECONDS = 30;
 
 export const VideoRecorder: React.FC = () => {
   // Recording state
@@ -54,11 +81,27 @@ export const VideoRecorder: React.FC = () => {
   const [showAIFeatures, setShowAIFeatures] = useState(false);
   const [videoProcessed, setVideoProcessed] = useState(false);
   const [showFullAI, setShowFullAI] = useState(false);
-  
+
+  // Advanced settings (applied to the capture + the MediaRecorder)
+  const [resolution, setResolution] = useState<Resolution>('1080p');
+  const [frameRate, setFrameRate] = useState(30);
+  const [quality, setQuality] = useState<Quality>('high');
+  const [noiseSuppression, setNoiseSuppression] = useState(true);
+  const [echoCancellation, setEchoCancellation] = useState(true);
+  const [sampleRate, setSampleRate] = useState(48000);
+  const [recordingModeSetting, setRecordingModeSetting] = useState<RecordingModeSetting>('continuous');
+  const [format, setFormat] = useState<RecordingFormat>('webm');
+  const [countdownEnabled, setCountdownEnabled] = useState(false);
+  const [countdownSeconds, setCountdownSeconds] = useState(3);
+
+  // Countdown overlay value (null while no countdown is running)
+  const [countdownValue, setCountdownValue] = useState<number | null>(null);
+
   // Recording details
   const [recordingTitle, setRecordingTitle] = useState('');
   const [recordingTags, setRecordingTags] = useState<string[]>([]);
   const [recordingFolder, setRecordingFolder] = useState<string | null>(null);
+  const [recordedThumbnail, setRecordedThumbnail] = useState<Blob | null>(null);
 
   // Refs
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -71,6 +114,11 @@ export const VideoRecorder: React.FC = () => {
   // subset of their tracks, so they need to be released separately.
   const sourceStreamsRef = useRef<MediaStream[]>([]);
   const localVideoUrlRef = useRef<string | null>(null);
+  // Elapsed seconds mirrored in a ref so the timer can enforce `maxDuration`
+  const recordingTimeRef = useRef(0);
+  // Auto-stop length of the take in progress ('timed'/'segmented' modes)
+  const maxDurationRef = useRef<number | undefined>(undefined);
+  const countdownTimeoutRef = useRef<number | null>(null);
 
   // AI Features
   const { features, toggleFeature, loadModels } = useAIFeatures();
@@ -89,12 +137,89 @@ export const VideoRecorder: React.FC = () => {
     }
   };
 
-  const startTimer = () => {
+  const startTimer = (maxDuration?: number) => {
     stopTimer();
     timerIntervalRef.current = window.setInterval(() => {
-      setRecordingTime(prevTime => prevTime + 1);
+      recordingTimeRef.current += 1;
+      setRecordingTime(recordingTimeRef.current);
+
+      // 'timed'/'segmented' takes stop themselves – `onstop` finalises the blob
+      if (
+        maxDuration &&
+        recordingTimeRef.current >= maxDuration &&
+        mediaRecorderRef.current?.state === 'recording'
+      ) {
+        mediaRecorderRef.current.stop();
+      }
     }, 1000);
   };
+
+  /** Auto-stop length for the selected recording mode ('continuous' = none). */
+  const getMaxDuration = (): number | undefined => {
+    switch (recordingModeSetting) {
+      case 'timed':
+        return TIMED_DURATION_SECONDS;
+      case 'segmented':
+        return SEGMENT_DURATION_SECONDS;
+      default:
+        return undefined;
+    }
+  };
+
+  /** Shows a 3..2..1 overlay and resolves once it reaches zero. */
+  const runCountdown = (seconds: number) =>
+    new Promise<void>(resolve => {
+      let remaining = Math.max(1, Math.round(seconds));
+      setCountdownValue(remaining);
+
+      const tick = () => {
+        countdownTimeoutRef.current = window.setTimeout(() => {
+          remaining -= 1;
+          if (remaining <= 0) {
+            countdownTimeoutRef.current = null;
+            setCountdownValue(null);
+            resolve();
+            return;
+          }
+          setCountdownValue(remaining);
+          tick();
+        }, 1000);
+      };
+
+      tick();
+    });
+
+  /**
+   * Grabs the frame currently shown in the <video> element as a PNG blob.
+   * Must run before the capture tracks are stopped, otherwise the element is
+   * already blank. Returns `null` when nothing can be drawn (e.g. tainted
+   * canvas or no frame yet).
+   */
+  const captureThumbnail = (): Promise<Blob | null> =>
+    new Promise(resolve => {
+      const video = videoRef.current;
+      if (!video || !video.videoWidth || !video.videoHeight) {
+        resolve(null);
+        return;
+      }
+
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const context = canvas.getContext('2d');
+        if (!context) {
+          resolve(null);
+          return;
+        }
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob(blob => resolve(blob), 'image/png');
+      } catch (err) {
+        // A thumbnail is a nice-to-have – never fail the recording over it
+        console.warn('Could not capture a thumbnail frame:', err);
+        resolve(null);
+      }
+    });
 
   // Release every capture track (camera, mic, screen) plus the audio mixer
   const releaseStream = () => {
@@ -194,6 +319,11 @@ export const VideoRecorder: React.FC = () => {
         timerIntervalRef.current = null;
       }
 
+      if (countdownTimeoutRef.current !== null) {
+        window.clearTimeout(countdownTimeoutRef.current);
+        countdownTimeoutRef.current = null;
+      }
+
       streamRef.current?.getTracks().forEach(track => track.stop());
       streamRef.current = null;
       sourceStreamsRef.current.forEach(source => {
@@ -259,31 +389,43 @@ export const VideoRecorder: React.FC = () => {
     setError(null);
     setIsProcessing(true);
     chunksRef.current = [];
+    recordingTimeRef.current = 0;
     setRecordingTime(0);
+    setRecordedThumbnail(null);
 
     let stream: MediaStream | null = null;
     const acquired: MediaStream[] = [];
 
     try {
-      const audioConstraints = {
+      // Audio settings from the Advanced Settings panel. Unsupported hints
+      // (e.g. `sampleRate` on some devices) are ignored rather than fatal
+      // because they are expressed as "ideal" constraints.
+      const audioConstraints: MediaTrackConstraints = {
         deviceId: selectedMicId ? { exact: selectedMicId } : undefined,
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true
+        echoCancellation,
+        noiseSuppression,
+        autoGainControl: true,
+        sampleRate: { ideal: sampleRate }
       };
 
-      const videoConstraints = selectedCameraId 
-        ? { deviceId: { exact: selectedCameraId } }
-        : true;
+      // Video settings: resolution preset + frame rate from the panel
+      const { width, height } = RESOLUTION_PRESETS[resolution];
+      const videoConstraints: MediaTrackConstraints = {
+        ...(selectedCameraId ? { deviceId: { exact: selectedCameraId } } : {}),
+        width: { ideal: width },
+        height: { ideal: height },
+        frameRate: { ideal: frameRate }
+      };
+      const displayConstraints: MediaTrackConstraints = {
+        width: { ideal: width },
+        height: { ideal: height },
+        frameRate: { ideal: frameRate }
+      };
 
       switch (recordingMode) {
         case 'screen': {
           const screenStream = await navigator.mediaDevices.getDisplayMedia({ 
-            video: { 
-              frameRate: { ideal: 30 },
-              width: { ideal: 1920 },
-              height: { ideal: 1080 }
-            },
+            video: displayConstraints,
             audio: true 
           });
           acquired.push(screenStream);
@@ -318,11 +460,7 @@ export const VideoRecorder: React.FC = () => {
 
         case 'pip': {
           const displayStream = await navigator.mediaDevices.getDisplayMedia({ 
-            video: {
-              frameRate: { ideal: 30 },
-              width: { ideal: 1920 },
-              height: { ideal: 1080 }
-            },
+            video: displayConstraints,
             audio: true 
           });
           acquired.push(displayStream);
@@ -387,11 +525,14 @@ export const VideoRecorder: React.FC = () => {
         videoRef.current.play().catch(() => undefined);
       }
 
-      // Codec support differs per browser – only pass a mimeType we probed
-      const mediaRecorder = createMediaRecorder(stream, {
-        videoBitsPerSecond: 2500000, // 2.5 Mbps
-        audioBitsPerSecond: 128000 // 128 kbps
-      });
+      // Codec support differs per browser – only pass a mimeType we probed.
+      // The requested container (webm/mp4) is preferred, with the usual
+      // vp9 → vp8 → webm fallback when it is unavailable.
+      const mediaRecorder = createMediaRecorder(
+        stream,
+        { bitsPerSecond: QUALITY_BITRATES[quality] },
+        getMimeCandidates(format)
+      );
       mediaRecorderRef.current = mediaRecorder;
 
       // Set up data handler
@@ -411,6 +552,10 @@ export const VideoRecorder: React.FC = () => {
 
       // Handle recording completion
       mediaRecorder.onstop = () => {
+        // Grab the last visible frame *before* the tracks are stopped, the
+        // <video> element goes blank as soon as the stream is released.
+        const thumbnailPromise = captureThumbnail();
+
         // Clean up recording resources
         stopTimer();
         releaseStream();
@@ -428,6 +573,7 @@ export const VideoRecorder: React.FC = () => {
         }
 
         setRecordedBlob(blob);
+        thumbnailPromise.then(setRecordedThumbnail).catch(() => setRecordedThumbnail(null));
 
         // Set default title based on date and time
         const now = new Date();
@@ -449,10 +595,12 @@ export const VideoRecorder: React.FC = () => {
         };
       });
 
-      // Start recording
+      // Start recording. 'timed'/'segmented' takes stop themselves once the
+      // configured duration has elapsed; 'continuous' runs until stopped.
+      maxDurationRef.current = getMaxDuration();
       mediaRecorder.start(1000); // Collect data every second
       setIsRecording(true);
-      startTimer();
+      startTimer(maxDurationRef.current);
     } catch (err) {
       console.error('Error starting recording:', err);
       stream?.getTracks().forEach(track => track.stop());
@@ -501,8 +649,19 @@ export const VideoRecorder: React.FC = () => {
     if (mediaRecorderRef.current?.state === 'paused') {
       mediaRecorderRef.current.resume();
       setIsPaused(false);
-      startTimer();
+      startTimer(maxDurationRef.current);
     }
+  };
+
+  /** Runs the optional countdown overlay, then starts the actual recording. */
+  const handleStartRecording = async () => {
+    if (isRecording || isProcessing || countdownValue !== null) return;
+
+    if (countdownEnabled) {
+      await runCountdown(countdownSeconds);
+    }
+
+    await startRecording();
   };
 
   const loadLocalFile = (file: File) => {
@@ -579,8 +738,9 @@ export const VideoRecorder: React.FC = () => {
       }
       
       // Get file format from blob type
-      const format = blob.type.split('/')[1]?.split(';')[0] || 'webm';
-      const fileName = `${crypto.randomUUID()}.${format}`;
+      const fileFormat = blob.type.split('/')[1]?.split(';')[0] || 'webm';
+      const baseName = crypto.randomUUID();
+      const fileName = `${baseName}.${fileFormat}`;
       
       // Upload the media to the private Storage bucket; the helper namespaces
       // the path by the signed-in user id so RLS permits the write.
@@ -589,16 +749,34 @@ export const VideoRecorder: React.FC = () => {
         setError(uploadError ?? 'Could not upload the recording.');
         return;
       }
+
+      // Upload the poster frame captured when the recording stopped (falling
+      // back to the frame currently on screen). A missing thumbnail is not
+      // fatal – the recording is still saved.
+      let thumbnailPath: string | null = null;
+      const thumbnailBlob = recordedThumbnail ?? (await captureThumbnail());
+      if (thumbnailBlob) {
+        const { path: thumbPath, error: thumbError } = await uploadRecordingMedia(
+          thumbnailBlob,
+          `${baseName}.png`,
+          'thumbs'
+        );
+        if (thumbError) {
+          console.warn('Could not upload the thumbnail:', thumbError);
+        } else {
+          thumbnailPath = thumbPath;
+        }
+      }
       
       // Persist the Storage path (resolved to a signed URL when listed)
       const { error } = await addRecording({
         title: recordingTitle,
         url: path,
-        thumbnail: null,
+        thumbnail: thumbnailPath,
         duration,
         size: blob.size,
         resolution: `${width}x${height}`,
-        format,
+        format: fileFormat,
         favorite: false,
         folder: recordingFolder,
         tags: recordingTags
@@ -612,6 +790,7 @@ export const VideoRecorder: React.FC = () => {
       // Close dialog and reset state
       setShowDownloadDialog(false);
       setRecordedBlob(null);
+      setRecordedThumbnail(null);
       setRecordingTitle('');
       setRecordingTags([]);
       setRecordingFolder(null);
@@ -709,6 +888,20 @@ export const VideoRecorder: React.FC = () => {
           </div>
         )}
         
+        {/* Countdown before recording starts */}
+        {countdownValue !== null && (
+          <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/60">
+            <motion.span
+              key={countdownValue}
+              initial={{ scale: 0.6, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="text-white text-7xl font-bold"
+            >
+              {countdownValue}
+            </motion.span>
+          </div>
+        )}
+
         {/* Recording timer */}
         {isRecording && (
           <div className="absolute top-4 left-4 bg-red-600 px-3 py-1 rounded-full text-white text-sm flex items-center space-x-2">
@@ -903,7 +1096,12 @@ export const VideoRecorder: React.FC = () => {
                   <div className="space-y-3">
                     <div>
                       <label className="block text-sm text-gray-600 mb-1">Resolution</label>
-                      <select className="w-full rounded-lg border-gray-300">
+                      <select
+                        value={resolution}
+                        onChange={(e) => setResolution(e.target.value as Resolution)}
+                        disabled={isRecording}
+                        className="w-full rounded-lg border-gray-300"
+                      >
                         <option value="1080p">1080p (1920x1080)</option>
                         <option value="720p">720p (1280x720)</option>
                         <option value="480p">480p (854x480)</option>
@@ -913,7 +1111,12 @@ export const VideoRecorder: React.FC = () => {
                     
                     <div>
                       <label className="block text-sm text-gray-600 mb-1">Frame Rate</label>
-                      <select className="w-full rounded-lg border-gray-300">
+                      <select
+                        value={frameRate}
+                        onChange={(e) => setFrameRate(Number(e.target.value))}
+                        disabled={isRecording}
+                        className="w-full rounded-lg border-gray-300"
+                      >
                         <option value="30">30 fps</option>
                         <option value="60">60 fps</option>
                         <option value="24">24 fps (Film)</option>
@@ -923,7 +1126,12 @@ export const VideoRecorder: React.FC = () => {
                     
                     <div>
                       <label className="block text-sm text-gray-600 mb-1">Quality</label>
-                      <select className="w-full rounded-lg border-gray-300">
+                      <select
+                        value={quality}
+                        onChange={(e) => setQuality(e.target.value as Quality)}
+                        disabled={isRecording}
+                        className="w-full rounded-lg border-gray-300"
+                      >
                         <option value="high">High (8 Mbps)</option>
                         <option value="medium">Medium (4 Mbps)</option>
                         <option value="low">Low (2 Mbps)</option>
@@ -945,7 +1153,9 @@ export const VideoRecorder: React.FC = () => {
                         <input
                           type="checkbox"
                           className="sr-only peer"
-                          defaultChecked
+                          checked={noiseSuppression}
+                          onChange={(e) => setNoiseSuppression(e.target.checked)}
+                          disabled={isRecording}
                         />
                         <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 
                           peer-focus:ring-[#E44E51]/30 rounded-full peer peer-checked:after:translate-x-full 
@@ -961,7 +1171,9 @@ export const VideoRecorder: React.FC = () => {
                         <input
                           type="checkbox"
                           className="sr-only peer"
-                          defaultChecked
+                          checked={echoCancellation}
+                          onChange={(e) => setEchoCancellation(e.target.checked)}
+                          disabled={isRecording}
                         />
                         <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 
                           peer-focus:ring-[#E44E51]/30 rounded-full peer peer-checked:after:translate-x-full 
@@ -973,7 +1185,12 @@ export const VideoRecorder: React.FC = () => {
                     
                     <div>
                       <label className="block text-sm text-gray-600 mb-1">Sample Rate</label>
-                      <select className="w-full rounded-lg border-gray-300">
+                      <select
+                        value={sampleRate}
+                        onChange={(e) => setSampleRate(Number(e.target.value))}
+                        disabled={isRecording}
+                        className="w-full rounded-lg border-gray-300"
+                      >
                         <option value="48000">48 kHz</option>
                         <option value="44100">44.1 kHz</option>
                         <option value="22050">22.05 kHz</option>
@@ -992,16 +1209,26 @@ export const VideoRecorder: React.FC = () => {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm text-gray-600 mb-1">Recording Mode</label>
-                    <select className="w-full rounded-lg border-gray-300">
+                    <select
+                      value={recordingModeSetting}
+                      onChange={(e) => setRecordingModeSetting(e.target.value as RecordingModeSetting)}
+                      disabled={isRecording}
+                      className="w-full rounded-lg border-gray-300"
+                    >
                       <option value="continuous">Continuous</option>
-                      <option value="timed">Timed Recording</option>
-                      <option value="segments">Segmented</option>
+                      <option value="timed">Timed ({TIMED_DURATION_SECONDS}s)</option>
+                      <option value="segmented">Segmented ({SEGMENT_DURATION_SECONDS}s chunks)</option>
                     </select>
                   </div>
                   
                   <div>
                     <label className="block text-sm text-gray-600 mb-1">Format</label>
-                    <select className="w-full rounded-lg border-gray-300">
+                    <select
+                      value={format}
+                      onChange={(e) => setFormat(e.target.value as RecordingFormat)}
+                      disabled={isRecording}
+                      className="w-full rounded-lg border-gray-300"
+                    >
                       <option value="webm">WebM</option>
                       <option value="mp4">MP4</option>
                     </select>
@@ -1010,17 +1237,35 @@ export const VideoRecorder: React.FC = () => {
                 
                 <div className="flex items-center justify-between mt-4">
                   <span className="text-sm text-gray-600">Countdown Before Recording</span>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="sr-only peer"
-                    />
-                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 
-                      peer-focus:ring-[#E44E51]/30 rounded-full peer peer-checked:after:translate-x-full 
-                      peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] 
-                      after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full 
-                      after:h-5 after:w-5 after:transition-all peer-checked:bg-[#E44E51]" />
-                  </label>
+                  <div className="flex items-center space-x-3">
+                    {countdownEnabled && (
+                      <select
+                        value={countdownSeconds}
+                        onChange={(e) => setCountdownSeconds(Number(e.target.value))}
+                        disabled={isRecording}
+                        className="rounded-lg border-gray-300 text-sm py-1"
+                        aria-label="Countdown length"
+                      >
+                        <option value="3">3s</option>
+                        <option value="5">5s</option>
+                        <option value="10">10s</option>
+                      </select>
+                    )}
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="sr-only peer"
+                        checked={countdownEnabled}
+                        onChange={(e) => setCountdownEnabled(e.target.checked)}
+                        disabled={isRecording}
+                      />
+                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 
+                        peer-focus:ring-[#E44E51]/30 rounded-full peer peer-checked:after:translate-x-full 
+                        peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] 
+                        after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full 
+                        after:h-5 after:w-5 after:transition-all peer-checked:bg-[#E44E51]" />
+                    </label>
+                  </div>
                 </div>
               </div>
             </motion.div>
@@ -1061,13 +1306,19 @@ export const VideoRecorder: React.FC = () => {
         <div className="flex justify-center space-y-2">
           {!isRecording ? (
             <button
-              onClick={startRecording}
-              disabled={isProcessing}
+              onClick={handleStartRecording}
+              disabled={isProcessing || countdownValue !== null}
               className="flex items-center space-x-2 px-6 py-3 bg-[#E44E51] text-white rounded-lg 
                 hover:bg-[#D43B3E] shadow-lg hover:shadow-[#E44E51]/25 disabled:opacity-50"
             >
               <Video className="w-5 h-5" />
-              <span>{isProcessing ? 'Initializing...' : 'Start Recording'}</span>
+              <span>
+                {countdownValue !== null
+                  ? `Starting in ${countdownValue}...`
+                  : isProcessing
+                    ? 'Initializing...'
+                    : 'Start Recording'}
+              </span>
             </button>
           ) : (
             <div className="flex space-x-3">
