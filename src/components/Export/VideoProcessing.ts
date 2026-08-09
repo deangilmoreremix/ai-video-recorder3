@@ -233,58 +233,136 @@ interface JobConfig {
   signal?: AbortSignal;
 }
 
-const runJob = ({ inputs, outputName, args, mimeType, onProgress, signal }: JobConfig): Promise<Blob> =>
+export interface FFmpegExecOptions {
+  onProgress?: ProgressCallback;
+  /**
+   * Expected duration of the *output* in seconds. When given, progress is
+   * derived from ffmpeg's own timestamp instead of its (input based) ratio,
+   * which is the only accurate option for multi-input filter graphs.
+   */
+  expectedDuration?: number;
+  /** Prefix for the error thrown when ffmpeg exits with a non-zero code. */
+  errorMessage?: string;
+  /** Return the exit code instead of throwing (used for capability probes). */
+  tolerateFailure?: boolean;
+}
+
+/**
+ * A serialised handle on the ffmpeg worker. Files written through a session
+ * stay in MEMFS between `exec` calls, which is what multi-pass renders (the
+ * B-Roll compositor) need.
+ */
+export interface FFmpegSession {
+  writeFile: (name: string, data: Blob | Uint8Array | string) => Promise<void>;
+  readFile: (name: string) => Promise<Uint8Array>;
+  /** Best effort: never throws if the file is already gone. */
+  deleteFile: (name: string) => Promise<void>;
+  exec: (args: string[], options?: FFmpegExecOptions) => Promise<number>;
+}
+
+/**
+ * Runs `job` with exclusive access to the ffmpeg worker (the core has a single
+ * MEMFS and cannot run two commands at once). Cancellation, error
+ * normalisation and progress plumbing are handled here.
+ */
+export const runFFmpegSession = <T,>(
+  job: (session: FFmpegSession) => Promise<T>,
+  signal?: AbortSignal
+): Promise<T> =>
   runExclusive(async () => {
     throwIfAborted(signal);
-
-    const totalBytes = inputs.reduce((sum, input) => sum + input.blob.size, 0);
-    if (totalBytes === 0) throw new Error('The selected recording is empty.');
-    if (totalBytes > MAX_INPUT_BYTES) {
-      throw new Error(
-        `This file is too large to convert in the browser (${Math.round(totalBytes / 1024 / 1024)} MB, ` +
-          `limit ${Math.round(MAX_INPUT_BYTES / 1024 / 1024)} MB). Trim the recording and try again.`
-      );
-    }
 
     const ffmpeg = await loadFFmpeg(signal);
     throwIfAborted(signal);
 
-    const handleProgress = ({ progress }: { progress: number }) => onProgress?.(clampProgress(progress * 100));
     // Aborting a running wasm command is only possible by killing the worker.
     const handleAbort = () => terminateFFmpeg();
-
-    if (onProgress) ffmpeg.on('progress', handleProgress);
     signal?.addEventListener('abort', handleAbort, { once: true });
 
-    try {
-      for (const input of inputs) {
-        await ffmpeg.writeFile(input.name, await fetchFile(input.blob));
+    const session: FFmpegSession = {
+      writeFile: async (name, data) => {
         throwIfAborted(signal);
+        await ffmpeg.writeFile(name, typeof data === 'string' || data instanceof Uint8Array ? data : await fetchFile(data));
+      },
+      readFile: async (name) => {
+        throwIfAborted(signal);
+        const data = await ffmpeg.readFile(name);
+        return typeof data === 'string' ? new TextEncoder().encode(data) : data;
+      },
+      deleteFile: async (name) => {
+        await removeFile(ffmpeg, name);
+      },
+      exec: async (args, options = {}) => {
+        throwIfAborted(signal);
+        const { onProgress, expectedDuration, errorMessage, tolerateFailure } = options;
+
+        const handleProgress = ({ progress, time }: { progress: number; time: number }) => {
+          // `time` is in microseconds.
+          const ratio =
+            expectedDuration && expectedDuration > 0 ? time / 1_000_000 / expectedDuration : progress;
+          onProgress?.(clampProgress(ratio * 100));
+        };
+        if (onProgress) ffmpeg.on('progress', handleProgress);
+
+        try {
+          const exitCode = await ffmpeg.exec(args, -1, { signal });
+          if (exitCode !== 0 && !tolerateFailure) {
+            throw new Error(
+              errorMessage
+                ? `${errorMessage} (ffmpeg exit code ${exitCode}).`
+                : `Conversion failed (ffmpeg exit code ${exitCode}). Try different export settings.`
+            );
+          }
+          return exitCode;
+        } finally {
+          if (onProgress) ffmpeg.off('progress', handleProgress);
+        }
       }
+    };
 
-      const exitCode = await ffmpeg.exec(args, -1, { signal });
-      if (exitCode !== 0) {
-        throw new Error(`Conversion failed (ffmpeg exit code ${exitCode}). Try different export settings.`);
-      }
-
-      const data = await ffmpeg.readFile(outputName);
-      const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
-      if (bytes.length === 0) throw new Error('Conversion produced an empty file.');
-
-      onProgress?.(100);
-      return new Blob([bytes], { type: mimeType });
+    try {
+      return await job(session);
     } catch (error) {
       if (signal?.aborted) throw new ExportCancelledError();
       throw toError(error);
     } finally {
       signal?.removeEventListener('abort', handleAbort);
-      if (onProgress) ffmpeg.off('progress', handleProgress);
-      for (const input of inputs) {
-        await removeFile(ffmpeg, input.name);
-      }
-      await removeFile(ffmpeg, outputName);
     }
   });
+
+const runJob = ({ inputs, outputName, args, mimeType, onProgress, signal }: JobConfig): Promise<Blob> => {
+  const totalBytes = inputs.reduce((sum, input) => sum + input.blob.size, 0);
+  if (totalBytes === 0) return Promise.reject(new Error('The selected recording is empty.'));
+  if (totalBytes > MAX_INPUT_BYTES) {
+    return Promise.reject(
+      new Error(
+        `This file is too large to convert in the browser (${Math.round(totalBytes / 1024 / 1024)} MB, ` +
+          `limit ${Math.round(MAX_INPUT_BYTES / 1024 / 1024)} MB). Trim the recording and try again.`
+      )
+    );
+  }
+
+  return runFFmpegSession(async (session) => {
+    try {
+      for (const input of inputs) {
+        await session.writeFile(input.name, input.blob);
+      }
+
+      await session.exec(args, { onProgress });
+
+      const bytes = await session.readFile(outputName);
+      if (bytes.length === 0) throw new Error('Conversion produced an empty file.');
+
+      onProgress?.(100);
+      return new Blob([bytes], { type: mimeType });
+    } finally {
+      for (const input of inputs) {
+        await session.deleteFile(input.name);
+      }
+      await session.deleteFile(outputName);
+    }
+  }, signal);
+};
 
 /* -------------------------------------------------------------------------- */
 /*  Format / codec helpers                                                    */

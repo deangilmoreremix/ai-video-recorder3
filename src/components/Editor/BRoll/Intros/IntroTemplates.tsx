@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Play, Star, Edit2, Clock, Filter, Search, Grid, List, Plus, Palette, Wand2, Layout, Box, Minimize2, Zap, type LucideIcon } from 'lucide-react';
+import { Play, Star, Edit2, Clock, Filter, Search, Grid, List, Plus, Palette, Wand2, Layout, Box, Minimize2, Zap, X, type LucideIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useIntroStore } from '../../../../store/introStore';
 import { Tooltip } from '../../../ui/Tooltip';
+import { IntroPreview } from './IntroPreview';
 
 interface Category {
   id: string;
@@ -66,8 +67,10 @@ export const IntroTemplates: React.FC<IntroTemplatesProps> = ({
 
   const handlePreview = (templateId: string) => {
     setPreviewTemplate(templateId);
-    // Additional preview logic will be implemented here
+    setSelectedTemplate(templateId);
   };
+
+  const previewedTemplate = templates.find(template => template.id === previewTemplate) ?? null;
 
   return (
     <div className="space-y-6">
@@ -259,6 +262,43 @@ export const IntroTemplates: React.FC<IntroTemplatesProps> = ({
           <p>No templates match your filters</p>
         </div>
       )}
+
+      {/* Preview Modal */}
+      <AnimatePresence>
+        {previewedTemplate && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
+            onClick={(e) => e.target === e.currentTarget && setPreviewTemplate(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.95 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.95 }}
+              className="bg-white rounded-lg w-full max-w-3xl p-4 space-y-4"
+            >
+              <div className="flex items-center justify-between">
+                <h4 className="font-semibold">{previewedTemplate.name}</h4>
+                <button
+                  onClick={() => setPreviewTemplate(null)}
+                  className="p-2 hover:bg-gray-100 rounded-lg"
+                  aria-label="Close preview"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <IntroPreview
+                templateData={{
+                  text: previewedTemplate.settings.text,
+                  style: previewedTemplate.settings.style
+                }}
+              />
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

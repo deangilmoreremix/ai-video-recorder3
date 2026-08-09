@@ -1,6 +1,11 @@
 import React, { useState } from 'react';
 import { BRollManager } from './BRollManager';
 import { Intros } from './Intros';
+import { Backgrounds } from './Backgrounds';
+import { Overlays } from './Overlays';
+import { Outros } from './Outros';
+import { Transitions } from './Transitions';
+import { ExportBRoll } from './ExportBRoll';
 import { Film, Play, Wand2, Layout, Image, Box } from 'lucide-react';
 import { cn } from '../../../utils/cn';
 
@@ -25,37 +30,13 @@ export const BRoll: React.FC = () => {
       case 'intros':
         return <Intros />;
       case 'backgrounds':
-        return (
-          <div className="p-8 text-center text-gray-500">
-            <Image className="w-12 h-12 mx-auto mb-4 opacity-50" />
-            <h3 className="text-lg font-medium mb-2">Backgrounds Coming Soon</h3>
-            <p>This feature will allow you to add and manage background videos and images.</p>
-          </div>
-        );
+        return <Backgrounds />;
       case 'overlays':
-        return (
-          <div className="p-8 text-center text-gray-500">
-            <Layout className="w-12 h-12 mx-auto mb-4 opacity-50" />
-            <h3 className="text-lg font-medium mb-2">Overlays Coming Soon</h3>
-            <p>This feature will allow you to add and manage video overlays and effects.</p>
-          </div>
-        );
+        return <Overlays />;
       case 'outros':
-        return (
-          <div className="p-8 text-center text-gray-500">
-            <Box className="w-12 h-12 mx-auto mb-4 opacity-50" />
-            <h3 className="text-lg font-medium mb-2">Outros Coming Soon</h3>
-            <p>This feature will allow you to create and manage video outros.</p>
-          </div>
-        );
+        return <Outros />;
       case 'transitions':
-        return (
-          <div className="p-8 text-center text-gray-500">
-            <Wand2 className="w-12 h-12 mx-auto mb-4 opacity-50" />
-            <h3 className="text-lg font-medium mb-2">Transitions Coming Soon</h3>
-            <p>This feature will allow you to add professional transitions between clips.</p>
-          </div>
-        );
+        return <Transitions />;
       default:
         return null;
     }
@@ -63,6 +44,17 @@ export const BRoll: React.FC = () => {
 
   return (
     <div className="bg-white rounded-lg shadow-lg p-4">
+      <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
+        <div>
+          <h3 className="text-lg font-semibold">B-Roll</h3>
+          <p className="text-sm text-gray-500 max-w-xl">
+            Sequence your clips, then bake the backgrounds, overlays and transitions into a single
+            video with “Export B-Roll”.
+          </p>
+        </div>
+        <ExportBRoll />
+      </div>
+
       <div className="border-b border-gray-200 mb-4">
         <div className="flex space-x-4 overflow-x-auto">
           {tabs.map(({ id, label, icon: Icon }) => (

@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei';
 import { Tooltip } from '../../../ui/Tooltip';
+import { ParticleField } from '../ParticleField';
 import { useOutroStore, type OutroTemplate } from '../../../../store/outroStore';
 
 type OutroSettings = OutroTemplate['settings'];
@@ -97,8 +98,9 @@ export const OutroEditor: React.FC<OutroEditorProps> = ({ templateId, onSave }) 
   );
 
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
-  const [isPreviewMode, setIsPreviewMode] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
+  // The preview starts visible so the editor always shows the live outro.
+  const [isPreviewMode, setIsPreviewMode] = useState(true);
+  const [isPlaying, setIsPlaying] = useState(true);
   const previewRef = useRef<HTMLDivElement>(null);
   // Object URLs created for uploaded media, released when the editor unmounts.
   const objectUrls = useRef<string[]>([]);
@@ -372,7 +374,7 @@ export const OutroEditor: React.FC<OutroEditorProps> = ({ templateId, onSave }) 
           <Canvas className="absolute inset-0 pointer-events-none">
             <PerspectiveCamera makeDefault position={[0, 0, 5]} />
             <OrbitControls enableZoom={false} enablePan={false} enableRotate={false} />
-            {/* Particle system will be implemented here */}
+            <ParticleField type={particles.type} density={particles.density} />
           </Canvas>
         )}
       </div>
