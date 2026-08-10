@@ -3,8 +3,19 @@ import { Film, Play, Settings, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useDropzone } from 'react-dropzone';
 
+/** Options the importer actually honours when the batch is processed. */
+export interface BatchSettings {
+  autoTag: boolean;
+  categorize: boolean;
+  generateThumbnails: boolean;
+  extractMetadata: boolean;
+  batchRename: boolean;
+  /** Supports the `{index}` and `{name}` tokens. */
+  renamePattern: string;
+}
+
 interface BatchProcessorProps {
-  onProcess: (files: File[]) => Promise<void>;
+  onProcess: (files: File[], settings: BatchSettings) => Promise<void>;
   isProcessing: boolean;
   progress?: number;
 }
@@ -16,17 +27,13 @@ export const BatchProcessor: React.FC<BatchProcessorProps> = ({
 }) => {
   const [files, setFiles] = useState<File[]>([]);
   const [showSettings, setShowSettings] = useState(false);
-  const [settings, setSettings] = useState({
-    autoAnalyze: true,
-    autoEnhance: false,
+  const [settings, setSettings] = useState<BatchSettings>({
     autoTag: true,
-    autoTrim: false,
-    batchRename: false,
-    renamePattern: '{index}-{name}',
     categorize: true,
-    compressOnImport: false,
     generateThumbnails: true,
-    extractMetadata: true
+    extractMetadata: true,
+    batchRename: false,
+    renamePattern: '{index}-{name}'
   });
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -46,7 +53,7 @@ export const BatchProcessor: React.FC<BatchProcessorProps> = ({
 
   const handleProcess = async () => {
     if (files.length === 0) return;
-    await onProcess(files);
+    await onProcess(files, settings);
     setFiles([]);
   };
 
@@ -117,30 +124,6 @@ export const BatchProcessor: React.FC<BatchProcessorProps> = ({
                     <label className="flex items-center space-x-2">
                       <input
                         type="checkbox"
-                        checked={settings.autoAnalyze}
-                        onChange={(e) => setSettings(s => ({
-                          ...s,
-                          autoAnalyze: e.target.checked
-                        }))}
-                        className="rounded border-gray-300 text-[#E44E51]"
-                      />
-                      <span className="text-sm">Auto Analyze</span>
-                    </label>
-                    <label className="flex items-center space-x-2">
-                      <input
-                        type="checkbox"
-                        checked={settings.autoEnhance}
-                        onChange={(e) => setSettings(s => ({
-                          ...s,
-                          autoEnhance: e.target.checked
-                        }))}
-                        className="rounded border-gray-300 text-[#E44E51]"
-                      />
-                      <span className="text-sm">Auto Enhance</span>
-                    </label>
-                    <label className="flex items-center space-x-2">
-                      <input
-                        type="checkbox"
                         checked={settings.autoTag}
                         onChange={(e) => setSettings(s => ({
                           ...s,
@@ -153,14 +136,14 @@ export const BatchProcessor: React.FC<BatchProcessorProps> = ({
                     <label className="flex items-center space-x-2">
                       <input
                         type="checkbox"
-                        checked={settings.autoTrim}
+                        checked={settings.categorize}
                         onChange={(e) => setSettings(s => ({
                           ...s,
-                          autoTrim: e.target.checked
+                          categorize: e.target.checked
                         }))}
                         className="rounded border-gray-300 text-[#E44E51]"
                       />
-                      <span className="text-sm">Auto Trim</span>
+                      <span className="text-sm">Auto Categorize</span>
                     </label>
                   </div>
 
@@ -192,30 +175,6 @@ export const BatchProcessor: React.FC<BatchProcessorProps> = ({
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
-                    <label className="flex items-center space-x-2">
-                      <input
-                        type="checkbox"
-                        checked={settings.categorize}
-                        onChange={(e) => setSettings(s => ({
-                          ...s,
-                          categorize: e.target.checked
-                        }))}
-                        className="rounded border-gray-300 text-[#E44E51]"
-                      />
-                      <span className="text-sm">Auto Categorize</span>
-                    </label>
-                    <label className="flex items-center space-x-2">
-                      <input
-                        type="checkbox"
-                        checked={settings.compressOnImport}
-                        onChange={(e) => setSettings(s => ({
-                          ...s,
-                          compressOnImport: e.target.checked
-                        }))}
-                        className="rounded border-gray-300 text-[#E44E51]"
-                      />
-                      <span className="text-sm">Compress on Import</span>
-                    </label>
                     <label className="flex items-center space-x-2">
                       <input
                         type="checkbox"

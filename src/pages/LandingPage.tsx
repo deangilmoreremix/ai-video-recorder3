@@ -367,7 +367,7 @@ const LandingPage = () => {
                 animate={{ opacity: [0, 1] }}
                 transition={{ duration: 1, delay: 5 }}
               >
-                AI Face Detection Active
+                AI Face Detection (illustration)
               </motion.div>
             </div>
           </div>
@@ -592,7 +592,7 @@ const LandingPage = () => {
                 viewport={{ once: true }}
                 transition={{ duration: 0.5, delay: 0.4 }}
               >
-                50+
+                17
               </motion.div>
               <p className="mt-2 text-xl font-medium text-gray-900">AI Features</p>
             </motion.div>

@@ -56,6 +56,13 @@ interface EditorState {
   isPlaying: boolean;
   volume: number;
   videoEffects: VideoEffectSettings;
+  /** Live preview of `videoEffects` on the player (the "eye" toggle). */
+  videoEffectsPreview: boolean;
+  /**
+   * The effect settings the user committed with "Apply Effects". These are the
+   * ones that get burned into an export; `videoEffects` is the working copy.
+   */
+  appliedVideoEffects: VideoEffectSettings | null;
   aiSettings: {
     faceDetection: boolean;
     beautification: boolean;
@@ -91,6 +98,10 @@ interface EditorState {
     performanceOptimization: boolean;
   };
   updateVideoEffects: (effects: Partial<EditorState['videoEffects']>) => void;
+  setVideoEffectsPreview: (enabled: boolean) => void;
+  /** Commits the current working effects so exports pick them up. */
+  applyVideoEffects: () => void;
+  clearAppliedVideoEffects: () => void;
   updateAISettings: (settings: Partial<EditorState['aiSettings']>) => void;
   updateAudioSettings: (settings: Partial<EditorState['audioSettings']>) => void;
   updateAdvancedFeatures: (features: Partial<EditorState['advancedFeatures']>) => void;
@@ -109,6 +120,8 @@ export const useEditorStore = create<EditorState>((set) => ({
   isPlaying: false,
   volume: 1,
   videoEffects: { ...defaultVideoEffects },
+  videoEffectsPreview: true,
+  appliedVideoEffects: null,
   aiSettings: {
     faceDetection: false,
     beautification: false,
@@ -147,6 +160,13 @@ export const useEditorStore = create<EditorState>((set) => ({
     set((state) => ({
       videoEffects: { ...state.videoEffects, ...effects }
     })),
+  setVideoEffectsPreview: (enabled) => set({ videoEffectsPreview: enabled }),
+  applyVideoEffects: () =>
+    set((state) => ({
+      appliedVideoEffects: { ...state.videoEffects },
+      videoEffectsPreview: true
+    })),
+  clearAppliedVideoEffects: () => set({ appliedVideoEffects: null }),
   updateAISettings: (settings) =>
     set((state) => ({
       aiSettings: { ...state.aiSettings, ...settings }
@@ -159,7 +179,7 @@ export const useEditorStore = create<EditorState>((set) => ({
     set((state) => ({
       advancedFeatures: { ...state.advancedFeatures, ...features }
     })),
-  resetVideoEffects: () => set({ videoEffects: { ...defaultVideoEffects } }),
+  resetVideoEffects: () => set({ videoEffects: { ...defaultVideoEffects }, appliedVideoEffects: null }),
   setCurrentProject: (project) => set({ currentProject: project }),
   setCurrentTime: (time) => set({ currentTime: time }),
   setDuration: (duration) => set({ duration }),

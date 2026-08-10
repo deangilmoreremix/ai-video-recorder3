@@ -4,6 +4,7 @@ import { useAIFeatures } from '../../hooks/useAIFeatures';
 import { createCanvasRecordingStream, createMediaRecorder } from '../../hooks/useVideoRecorder';
 import { AIFeatureGrid } from '../AI/AIFeatureGrid';
 import { AIProcessingOverlay } from '../AI/AIProcessingOverlay';
+import { copyToClipboard } from '../../utils/links';
 
 interface AIPreviewEditorProps {
   videoUrl: string;
@@ -53,6 +54,7 @@ export const AIPreviewEditor: React.FC<AIPreviewEditorProps> = ({
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
   const [progress, setProgress] = useState(0);
   const [processedBlob, setProcessedBlob] = useState<Blob | null>(null);
+  const [shareStatus, setShareStatus] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   // Audio captured from the <video> element – reused across exports because
@@ -316,6 +318,40 @@ export const AIPreviewEditor: React.FC<AIPreviewEditorProps> = ({
     window.setTimeout(() => URL.revokeObjectURL(url), 10000);
   };
 
+  /** Shares the enhanced clip via the Web Share API, or copies a link. */
+  const shareProcessed = async () => {
+    const blob = processedBlob;
+    if (!blob) {
+      setShareStatus('Process the clip before sharing.');
+      return;
+    }
+
+    const extension = blob.type.split('/')[1]?.split(';')[0] || 'webm';
+    const fileName = `ai-enhanced.${extension}`;
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: 'AI Enhanced Video',
+          files: [new File([blob], fileName, { type: blob.type })]
+        });
+        return;
+      } catch {
+        // User dismissed the share sheet; fall back to copying a link.
+      }
+    }
+
+    const url = URL.createObjectURL(blob);
+    const copied = await copyToClipboard(url);
+    window.setTimeout(() => URL.revokeObjectURL(url), 10000);
+    setShareStatus(
+      copied
+        ? 'Link to the enhanced clip copied to your clipboard.'
+        : 'Could not copy the share link in this browser.'
+    );
+    window.setTimeout(() => setShareStatus(null), 4000);
+  };
+
   return (
     <div className="bg-white rounded-lg shadow-lg p-4">
       <div className="flex items-center justify-between mb-4">
@@ -365,8 +401,10 @@ export const AIPreviewEditor: React.FC<AIPreviewEditorProps> = ({
             </button>
             <div className="flex space-x-2">
               <button
-                onClick={() => {}}
-                className="p-2 bg-white rounded-full hover:bg-gray-100"
+                onClick={shareProcessed}
+                disabled={!processedBlob}
+                title={processedBlob ? 'Share the enhanced clip' : 'Process the clip first'}
+                className="p-2 bg-white rounded-full hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Share2 className="w-4 h-4" />
               </button>
@@ -382,6 +420,10 @@ export const AIPreviewEditor: React.FC<AIPreviewEditorProps> = ({
             </div>
           </div>
         </div>
+
+        {shareStatus && (
+          <p className="text-xs text-white/90 mt-2 px-1">{shareStatus}</p>
+        )}
       </div>
 
       {/* AI Features Grid */}

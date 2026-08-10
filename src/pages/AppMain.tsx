@@ -1,5 +1,5 @@
 import { Component, useCallback, useEffect, useState, type ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { VideoRecorder } from '../components/Recorder/VideoRecorder';
 import { VideoPlayback } from '../components/Preview/VideoPlayback';
 import { FeatureList } from '../components/Features/FeatureList';
@@ -8,7 +8,7 @@ import { WalkthroughTutorial } from '../components/Tutorial/WalkthroughTutorial'
 import { FeatureAssistant } from '../components/Assistant/FeatureAssistant';
 import { AlertTriangle, HelpCircle, Video, Grid } from 'lucide-react';
 import RecordingsLibrary from '../components/Recordings/RecordingsLibrary';
-import { isSupabaseConfigured } from '../utils/supabaseClient';
+import { getRecordings, isSafeMediaUrl, isSupabaseConfigured } from '../utils/supabaseClient';
 import '../index.css';
 
 const TUTORIAL_STORAGE_KEY = 'hasSeenTutorial';
@@ -78,10 +78,14 @@ class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorBoundary
 }
 
 function AppMain() {
+  const location = useLocation();
   const [showTutorial, setShowTutorial] = useState(false);
   const [hasSeenTutorial, setHasSeenTutorial] = useState(false);
   const [showRecordings, setShowRecordings] = useState(false);
   const [isReady, setIsReady] = useState(false);
+  // The recording currently loaded into the editor. Set when a user clicks
+  // "Edit" on a recording or lands here from `/recordings?edit=`.
+  const [editorSource, setEditorSource] = useState<{ url: string; title?: string } | null>(null);
 
   useEffect(() => {
     const seen = safeLocalStorage.get(TUTORIAL_STORAGE_KEY);
@@ -92,6 +96,30 @@ function AppMain() {
     }
     setIsReady(true);
   }, []);
+
+  /**
+   * Loads a recording (by id) into the editor. The recording list is owned by
+   * the library, so we re-fetch and pick the matching row, then hand the safe
+   * media URL to `VideoPlayback` as its `source`.
+   */
+  const loadRecordingForEdit = useCallback(async (recordingId: string) => {
+    setShowRecordings(false);
+    try {
+      const recordings = await getRecordings();
+      const recording = recordings.find(rec => rec.id === recordingId);
+      if (recording && isSafeMediaUrl(recording.url)) {
+        setEditorSource({ url: recording.url, title: recording.title });
+      }
+    } catch {
+      // The library remains the source of truth; ignore fetch failures here.
+    }
+  }, []);
+
+  // Honor a deep link from the `/recordings` page (navigate state).
+  useEffect(() => {
+    const editId = (location.state as { editRecordingId?: string } | null)?.editRecordingId;
+    if (editId) loadRecordingForEdit(editId);
+  }, [location.state, loadRecordingForEdit]);
 
   const handleCloseTutorial = useCallback(() => {
     setShowTutorial(false);
@@ -164,10 +192,7 @@ function AppMain() {
               <RecordingsLibrary 
                 onBackToRecorder={() => setShowRecordings(false)}
                 onEditRecording={(recordingId) => {
-                  // Handle editing a recording
-                  console.log(`Editing recording: ${recordingId}`);
-                  setShowRecordings(false);
-                  // Additional logic to load the recording for editing
+                  loadRecordingForEdit(recordingId);
                 }}
               />
             ) : (
@@ -178,7 +203,7 @@ function AppMain() {
                 </div>
                 
                 <div className="space-y-6">
-                  <VideoPlayback />
+                  <VideoPlayback source={editorSource} />
                   <AdvancedControls />
                 </div>
               </div>

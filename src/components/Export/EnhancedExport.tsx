@@ -1,7 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { AlertCircle, ChevronRight, Download, Loader, Sparkles, X, Settings, Youtube, Instagram, Twitter, Facebook, Linkedin, Palette, Wind, ImagePlus, Move } from 'lucide-react';
+import { AlertCircle, ChevronRight, Download, Loader, Sparkles, X, Settings, Youtube, Instagram, Twitter, Facebook, Linkedin, Palette, Wind, ImagePlus, Move, Wand2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Tooltip } from '../ui/Tooltip';
+import { useEditorStore } from '../../store';
+import { buildFfmpegFilters, hasActiveEffects } from '../../utils/videoEffects';
 import {
   buildFileName,
   downloadBlob,
@@ -11,6 +13,23 @@ import {
   toError,
   type WatermarkPosition
 } from './VideoProcessing';
+
+/**
+ * Per-platform delivery recommendations. Picking a platform rewrites the
+ * resolution/fps/bitrate so "Optimize For" actually changes the output.
+ */
+const PLATFORM_PRESETS: Record<
+  string,
+  { resolution: { width: number; height: number }; fps: number; bitrate: { video: number; audio: number } } | null
+> = {
+  youtube: { resolution: { width: 1920, height: 1080 }, fps: 60, bitrate: { video: 8000, audio: 192 } },
+  instagram: { resolution: { width: 1080, height: 1080 }, fps: 30, bitrate: { video: 3500, audio: 128 } },
+  twitter: { resolution: { width: 1280, height: 720 }, fps: 30, bitrate: { video: 5000, audio: 128 } },
+  facebook: { resolution: { width: 1920, height: 1080 }, fps: 30, bitrate: { video: 4000, audio: 128 } },
+  linkedin: { resolution: { width: 1920, height: 1080 }, fps: 30, bitrate: { video: 5000, audio: 128 } },
+  // "Custom" keeps whatever the user configured.
+  custom: null
+};
 
 const WATERMARK_POSITIONS: WatermarkPosition[] = [
   'top-left',
@@ -121,11 +140,32 @@ export const EnhancedExport: React.FC<EnhancedExportProps> = ({
   const previewRef = useRef<string>('');
   previewRef.current = settings.watermark.preview;
 
+  // Effects committed with "Apply Effects" in the editor are burned in here.
+  const appliedVideoEffects = useEditorStore((state) => state.appliedVideoEffects);
+  const [burnInEffects, setBurnInEffects] = useState(true);
+  const effectFilters =
+    appliedVideoEffects && hasActiveEffects(appliedVideoEffects)
+      ? buildFfmpegFilters(appliedVideoEffects)
+      : [];
+
+  /** Applies a platform's recommended delivery settings. */
+  const selectPlatform = (platformId: string) => {
+    const preset = PLATFORM_PRESETS[platformId];
+    setSettings(prev => ({
+      ...prev,
+      ...(preset
+        ? { resolution: preset.resolution, fps: preset.fps, bitrate: preset.bitrate }
+        : {}),
+      optimization: { ...prev.optimization, platform: platformId }
+    }));
+  };
+
   const handleWatermarkUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       if (!file.type.startsWith('image/')) {
-        alert('Please upload an image file');
+        setError('The watermark has to be an image file (PNG, JPG or WebP).');
+        e.target.value = '';
         return;
       }
 
@@ -179,6 +219,10 @@ export const EnhancedExport: React.FC<EnhancedExportProps> = ({
           denoise: settings.ai.denoise,
           stabilize: settings.ai.stabilize,
           enhanceColors: settings.ai.enhance || settings.ai.colorCorrect,
+          videoFilters: burnInEffects ? effectFilters : undefined,
+          metadata: settings.optimization.metadata
+            ? { title: buildFileName('exported_video', settings.format), tags: settings.optimization.platform }
+            : undefined,
           watermark: settings.watermark.enabled && settings.watermark.file
             ? {
                 file: settings.watermark.file,
@@ -277,13 +321,7 @@ export const EnhancedExport: React.FC<EnhancedExportProps> = ({
               {platforms.map(({ id, name, icon: Icon }) => (
                 <Tooltip key={id} content={name}>
                   <button
-                    onClick={() => setSettings(prev => ({
-                      ...prev,
-                      optimization: {
-                        ...prev.optimization,
-                        platform: id
-                      }
-                    }))}
+                    onClick={() => selectPlatform(id)}
                     className={`p-3 rounded-lg border transition-colors ${
                       settings.optimization.platform === id
                         ? 'border-[#E44E51] bg-[#E44E51]/5'
@@ -295,7 +333,30 @@ export const EnhancedExport: React.FC<EnhancedExportProps> = ({
                 </Tooltip>
               ))}
             </div>
+            <p className="text-xs text-gray-500">
+              {settings.resolution.width}×{settings.resolution.height} • {settings.fps} fps •{' '}
+              {settings.bitrate.video} kbps
+            </p>
           </div>
+
+          {/* Colour grade from the effects panel */}
+          {effectFilters.length > 0 && (
+            <label className="flex items-center justify-between p-3 bg-[#E44E51]/5 border border-[#E44E51]/20 rounded-lg">
+              <div className="flex items-center space-x-2">
+                <Wand2 className="w-4 h-4 text-[#E44E51]" />
+                <span className="text-sm">
+                  Burn in the applied video effects ({effectFilters.length} filter
+                  {effectFilters.length === 1 ? '' : 's'})
+                </span>
+              </div>
+              <input
+                type="checkbox"
+                checked={burnInEffects}
+                onChange={(e) => setBurnInEffects(e.target.checked)}
+                className="rounded border-gray-300 text-[#E44E51] focus:ring-[#E44E51]"
+              />
+            </label>
+          )}
 
           {/* AI Enhancement */}
           <div className="space-y-3">

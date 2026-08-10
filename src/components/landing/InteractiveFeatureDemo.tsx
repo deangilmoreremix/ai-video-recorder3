@@ -722,8 +722,8 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
   return (
     <div className="rounded-xl bg-white shadow-xl p-6 border border-gray-100">
       <div className="mb-6">
-        <h3 className="text-2xl font-bold text-gray-900">Try AI Features</h3>
-        <p className="mt-2 text-gray-600">Interact with our AI features to see how they work</p>
+        <h3 className="text-2xl font-bold text-gray-900">Preview AI Features</h3>
+        <p className="mt-2 text-gray-600">Illustrated previews of each effect - the real models run in the recorder</p>
       </div>
       
       {/* Feature demo area */}
@@ -867,7 +867,7 @@ const InteractiveFeatureDemo: React.FC<InteractiveFeatureDemoProps> = ({ initial
           </div>
           
           <div className="mt-4 text-center text-sm text-gray-500">
-            Move the slider to adjust the AI effect intensity
+            Move the slider to adjust the strength of this illustrated preview
           </div>
         </div>
       </div>

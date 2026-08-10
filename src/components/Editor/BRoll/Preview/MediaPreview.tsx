@@ -31,6 +31,7 @@ export const MediaPreview: React.FC<MediaPreviewProps> = ({
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
   const mediaRef = useRef<HTMLVideoElement | HTMLAudioElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -95,6 +96,67 @@ export const MediaPreview: React.FC<MediaPreviewProps> = ({
     const sizes = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+  };
+
+  const extensionFor = (): string => {
+    const fromName = title.includes('.') ? title.split('.').pop() : '';
+    if (fromName) return '';
+    if (metadata?.format?.includes('/')) return `.${metadata.format.split('/')[1]}`;
+    return type === 'image' ? '.png' : type === 'audio' ? '.mp3' : '.mp4';
+  };
+
+  /** Download the previewed media (works for blob:, data: and remote URLs). */
+  const handleDownload = async () => {
+    try {
+      let href = url;
+      let revoke = false;
+      if (!url.startsWith('blob:') && !url.startsWith('data:')) {
+        // Fetch first so cross-origin files download instead of navigating.
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        href = URL.createObjectURL(await response.blob());
+        revoke = true;
+      }
+      const link = document.createElement('a');
+      link.href = href;
+      link.download = `${title}${extensionFor()}`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      if (revoke) setTimeout(() => URL.revokeObjectURL(href), 10_000);
+      setActionMessage('Download started');
+    } catch {
+      setActionMessage('Could not download this file');
+    }
+  };
+
+  /** Share via the Web Share API, falling back to copying the link. */
+  const handleShare = async () => {
+    const isLocal = url.startsWith('blob:') || url.startsWith('data:');
+    try {
+      if (!isLocal && typeof navigator.share === 'function') {
+        await navigator.share({ title, url });
+        setActionMessage('Shared');
+        return;
+      }
+      if (typeof navigator.share === 'function' && typeof fetch === 'function') {
+        const blob = await (await fetch(url)).blob();
+        const file = new File([blob], `${title}${extensionFor()}`, { type: blob.type });
+        if (navigator.canShare?.({ files: [file] })) {
+          await navigator.share({ title, files: [file] });
+          setActionMessage('Shared');
+          return;
+        }
+      }
+      if (!isLocal && navigator.clipboard) {
+        await navigator.clipboard.writeText(url);
+        setActionMessage('Link copied to clipboard');
+        return;
+      }
+      setActionMessage('Sharing is not available for local files — use Download instead');
+    } catch {
+      setActionMessage('Sharing was cancelled');
+    }
   };
 
   return (
@@ -282,16 +344,25 @@ export const MediaPreview: React.FC<MediaPreviewProps> = ({
           )}
 
           {/* Action Buttons */}
-          <div className="flex justify-end space-x-2 pt-4 border-t">
-            <button className="px-4 py-2 flex items-center space-x-2 text-gray-700 hover:bg-gray-100 rounded-lg">
-              <Share2 className="w-4 h-4" />
-              <span>Share</span>
-            </button>
-            <button className="px-4 py-2 flex items-center space-x-2 bg-[#E44E51] text-white rounded-lg 
-              hover:bg-[#D43B3E] shadow-lg hover:shadow-[#E44E51]/25">
-              <Download className="w-4 h-4" />
-              <span>Download</span>
-            </button>
+          <div className="flex items-center justify-between pt-4 border-t">
+            <span className="text-sm text-gray-500">{actionMessage}</span>
+            <div className="flex space-x-2">
+              <button
+                onClick={handleShare}
+                className="px-4 py-2 flex items-center space-x-2 text-gray-700 hover:bg-gray-100 rounded-lg"
+              >
+                <Share2 className="w-4 h-4" />
+                <span>Share</span>
+              </button>
+              <button
+                onClick={handleDownload}
+                className="px-4 py-2 flex items-center space-x-2 bg-[#E44E51] text-white rounded-lg 
+                  hover:bg-[#D43B3E] shadow-lg hover:shadow-[#E44E51]/25"
+              >
+                <Download className="w-4 h-4" />
+                <span>Download</span>
+              </button>
+            </div>
           </div>
         </div>
       </motion.div>

@@ -290,9 +290,11 @@ export const IntroTemplates: React.FC<IntroTemplatesProps> = ({
                 </button>
               </div>
               <IntroPreview
+                name={previewedTemplate.name}
                 templateData={{
                   text: previewedTemplate.settings.text,
-                  style: previewedTemplate.settings.style
+                  style: previewedTemplate.settings.style,
+                  media: previewedTemplate.settings.media
                 }}
               />
             </motion.div>

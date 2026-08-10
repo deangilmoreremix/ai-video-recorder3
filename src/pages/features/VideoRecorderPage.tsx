@@ -61,8 +61,8 @@ const VideoRecorderPage = () => {
       features: [
         'Full desktop or single application capture',
         'System audio recording',
-        'Mouse click visualization',
-        'Highlight active windows and regions'
+        'Choose a screen, window or browser tab',
+        'Optional 3-2-1 countdown before capture'
       ]
     },
     {

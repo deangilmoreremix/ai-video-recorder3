@@ -68,15 +68,15 @@ const AIFeaturesPage = () => {
     {
       id: 'beautification',
       title: 'AI Beautification',
-      description: 'Enhance your appearance with subtle filters that adjust automatically to lighting conditions.',
+      description: 'Smooth skin on detected faces with an edge-preserving filter that keeps hair and eye detail sharp.',
       icon: Sparkles,
       videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-young-woman-posing-outdoors-on-a-sunny-day-43806-large.mp4',
       color: 'bg-pink-500'
     },
     {
       id: 'gesture-recognition',
-      title: 'Gesture Control',
-      description: 'Control your recording with hand gestures - start, stop, and control effects without touching your device.',
+      title: 'Gesture Recognition',
+      description: 'Recognise hand gestures - fist, open hand, peace, pointing and pinch - and label them live on the recording canvas.',
       icon: Send,
       videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-a-hand-using-a-smartphone-device-close-up-40833-large.mp4',
       color: 'bg-yellow-500'
@@ -90,9 +90,9 @@ const AIFeaturesPage = () => {
       color: 'bg-red-500'
     },
     {
-      id: 'smart-effects',
-      title: 'Smart Effects',
-      description: 'Apply context-aware effects that understand the content of your video and adapt accordingly.',
+      id: 'scene-detection',
+      title: 'Scene Detection',
+      description: 'Spot shot changes automatically from frame histograms while you record, so cuts are easy to find later.',
       icon: Wand2,
       videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-vertical-shot-of-traffic-lights-18202-large.mp4',
       color: 'bg-cyan-600'
@@ -131,7 +131,7 @@ const AIFeaturesPage = () => {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.8, delay: 0.4 }}
             >
-              Transform your videos with cutting-edge artificial intelligence. Our advanced AI features work in real-time to enhance quality, enable interactive controls, and create professional effects automatically.
+              Transform your videos with cutting-edge machine learning. Our AI features run in real time inside the recorder to track faces, hands and bodies, clean up your image, and bake professional effects straight into the take.
             </motion.p>
           </motion.div>
           
@@ -255,7 +255,7 @@ const AIFeaturesPage = () => {
                 <HandMetal className="w-6 h-6 text-teal-600" />
               </div>
               <h3 className="text-xl font-bold text-gray-900 mb-2">Gesture Recognition</h3>
-              <p className="text-gray-600">Our neural networks can recognize dozens of hand gestures for intuitive control.</p>
+              <p className="text-gray-600">Hand keypoints from MediaPipe Hands are classified into five gestures - fist, open hand, peace, pointing and pinch - and shown on screen.</p>
             </div>
           </div>
         </div>

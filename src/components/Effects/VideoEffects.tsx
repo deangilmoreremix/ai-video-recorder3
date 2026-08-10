@@ -1,7 +1,15 @@
-import React, { useState } from 'react';
-import { Droplets, Sun, Contrast, Palette, Sparkles, CloudFog, Wind, Sliders, Layers, Fingerprint, Aperture, Flame, Snowflake, Rainbow, Filter, Maximize, RotateCcw, Eye, Film, Camera, Brush, Undo, Redo, Loader, Bookmark, Star, type LucideIcon } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Droplets, Sun, Contrast, Palette, Sparkles, CloudFog, Wind, Sliders, Layers, Fingerprint, Aperture, Flame, Snowflake, Rainbow, Filter, Maximize, RotateCcw, Eye, EyeOff, Film, Camera, Brush, Undo, Redo, Bookmark, Star, Trash2, Check, type LucideIcon } from 'lucide-react';
 import { Tooltip } from '../ui/Tooltip';
-import { useEditorStore, type VideoEffectSettings } from '../../store';
+import { useEditorStore, defaultVideoEffects, type VideoEffectSettings } from '../../store';
+import {
+  buildCssFilter,
+  deleteEffectPreset,
+  hasActiveEffects,
+  loadEffectPresets,
+  saveEffectPreset,
+  type StoredEffectPreset
+} from '../../utils/videoEffects';
 
 interface EffectPreset {
   name: string;
@@ -32,13 +40,35 @@ interface EffectPreset {
 }
 
 export const VideoEffects: React.FC = () => {
-  const { videoEffects, updateVideoEffects } = useEditorStore();
-  const [, setActiveEffect] = useState<string | null>(null);
-  const [showPreview, setShowPreview] = useState(false);
-  const [history, setHistory] = useState<VideoEffectSettings[]>([]);
-  const [historyIndex, setHistoryIndex] = useState(-1);
-  const [isSaving, setIsSaving] = useState(false);
+  const {
+    videoEffects,
+    updateVideoEffects,
+    videoEffectsPreview,
+    setVideoEffectsPreview,
+    appliedVideoEffects,
+    applyVideoEffects,
+    clearAppliedVideoEffects
+  } = useEditorStore();
+  const [activeEffect, setActiveEffect] = useState<string | null>(null);
+  const [history, setHistory] = useState<VideoEffectSettings[]>([{ ...videoEffects }]);
+  const [historyIndex, setHistoryIndex] = useState(0);
+  const [customPresets, setCustomPresets] = useState<StoredEffectPreset[]>([]);
+  const [presetName, setPresetName] = useState('');
+  const [showPresetForm, setShowPresetForm] = useState(false);
   const [favorites, setFavorites] = useState<string[]>([]);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+
+  // Presets saved by the user live in localStorage so they survive a reload.
+  useEffect(() => {
+    setCustomPresets(loadEffectPresets());
+  }, []);
+
+  // Auto-hide the confirmation line.
+  useEffect(() => {
+    if (!statusMessage) return;
+    const timer = window.setTimeout(() => setStatusMessage(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [statusMessage]);
 
   const presets: EffectPreset[] = [
     {
@@ -172,43 +202,74 @@ export const VideoEffects: React.FC = () => {
     }
   ];
 
-  const applyPreset = (preset: EffectPreset) => {
-    const prevSettings = { ...videoEffects };
-    updateVideoEffects(preset.settings);
-    addToHistory(prevSettings);
+  /** Pushes a snapshot on the undo stack (drops any redo entries). */
+  const commitToHistory = (settings: VideoEffectSettings) => {
+    setHistory((prev) => {
+      const truncated = prev.slice(0, historyIndex + 1);
+      const last = truncated[truncated.length - 1];
+      if (last && JSON.stringify(last) === JSON.stringify(settings)) return prev;
+      const next = [...truncated, { ...settings }].slice(-50);
+      setHistoryIndex(next.length - 1);
+      return next;
+    });
   };
 
-  const addToHistory = (settings: VideoEffectSettings) => {
-    const newHistory = [...history.slice(0, historyIndex + 1), settings];
-    setHistory(newHistory);
-    setHistoryIndex(newHistory.length - 1);
+  const applyPreset = (settings: VideoEffectSettings, name: string) => {
+    updateVideoEffects(settings);
+    commitToHistory(settings);
+    setActiveEffect(name);
+    setVideoEffectsPreview(true);
   };
 
   const undo = () => {
-    if (historyIndex > 0) {
-      setHistoryIndex(historyIndex - 1);
-      updateVideoEffects(history[historyIndex - 1]);
-    }
+    if (historyIndex <= 0) return;
+    const index = historyIndex - 1;
+    setHistoryIndex(index);
+    updateVideoEffects(history[index]);
   };
 
   const redo = () => {
-    if (historyIndex < history.length - 1) {
-      setHistoryIndex(historyIndex + 1);
-      updateVideoEffects(history[historyIndex + 1]);
-    }
+    if (historyIndex >= history.length - 1) return;
+    const index = historyIndex + 1;
+    setHistoryIndex(index);
+    updateVideoEffects(history[index]);
   };
 
-  const savePreset = async () => {
-    setIsSaving(true);
-    try {
-      // Save preset logic here
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      // Success notification would go here
-    } catch (error) {
-      // Error handling would go here
-    } finally {
-      setIsSaving(false);
+  /** Stores the current slider values under a name (localStorage backed). */
+  const savePreset = () => {
+    const name = presetName.trim();
+    if (!name) {
+      setStatusMessage('Give the preset a name before saving it.');
+      return;
     }
+    setCustomPresets(saveEffectPreset(name, videoEffects));
+    setPresetName('');
+    setShowPresetForm(false);
+    setStatusMessage(`Saved “${name}” to your presets.`);
+  };
+
+  const removePreset = (name: string) => {
+    setCustomPresets(deleteEffectPreset(name));
+    setFavorites((prev) => prev.filter((entry) => entry !== name));
+    setStatusMessage(`Removed “${name}”.`);
+  };
+
+  /** Commits the current look so the exporter burns it into the file. */
+  const handleApplyEffects = () => {
+    if (!hasActiveEffects(videoEffects)) {
+      clearAppliedVideoEffects();
+      setStatusMessage('No effects to apply — the video is at its default look.');
+      return;
+    }
+    applyVideoEffects();
+    setStatusMessage('Effects applied to the preview and queued for the next export.');
+  };
+
+  const resetEffects = () => {
+    updateVideoEffects({ ...defaultVideoEffects });
+    commitToHistory(defaultVideoEffects);
+    clearAppliedVideoEffects();
+    setActiveEffect(null);
   };
 
   const toggleFavorite = (presetName: string) => {
@@ -219,19 +280,35 @@ export const VideoEffects: React.FC = () => {
     );
   };
 
+  const previewFilter = useMemo(() => buildCssFilter(videoEffects) || 'none', [videoEffects]);
+  // Favourites are pinned to the front of the grid.
+  const sortedPresets = useMemo(
+    () =>
+      [...presets].sort(
+        (a, b) => Number(favorites.includes(b.name)) - Number(favorites.includes(a.name))
+      ),
+    // `presets` is a stable literal defined in this render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [favorites]
+  );
+
+  const isApplied =
+    appliedVideoEffects !== null &&
+    JSON.stringify(appliedVideoEffects) === JSON.stringify(videoEffects);
+
   return (
     <div className="bg-white rounded-lg shadow-lg p-4">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-lg font-semibold">Video Effects</h3>
         <div className="flex space-x-2">
-          <Tooltip content="Toggle effect preview">
+          <Tooltip content={videoEffectsPreview ? 'Hide the effects in the player' : 'Show the effects in the player'}>
             <button
-              onClick={() => setShowPreview(!showPreview)}
+              onClick={() => setVideoEffectsPreview(!videoEffectsPreview)}
               className={`p-2 rounded-lg ${
-                showPreview ? 'bg-[#E44E51]/10 text-[#E44E51]' : 'hover:bg-gray-100'
+                videoEffectsPreview ? 'bg-[#E44E51]/10 text-[#E44E51]' : 'hover:bg-gray-100'
               }`}
             >
-              <Eye className="w-5 h-5" />
+              {videoEffectsPreview ? <Eye className="w-5 h-5" /> : <EyeOff className="w-5 h-5" />}
             </button>
           </Tooltip>
           <Tooltip content="Undo">
@@ -254,33 +331,7 @@ export const VideoEffects: React.FC = () => {
           </Tooltip>
           <Tooltip content="Reset all effects">
             <button
-              onClick={() => {
-                const prevSettings = { ...videoEffects };
-                updateVideoEffects({
-                  brightness: 1,
-                  contrast: 1,
-                  saturation: 1,
-                  blur: 0,
-                  sharpness: 1,
-                  temperature: 1,
-                  vignette: 0,
-                  grain: 0,
-                  hue: 0,
-                  sepia: 0,
-                  noise: 0,
-                  bloom: 0,
-                  clarity: 1,
-                  vibrance: 1,
-                  exposure: 0,
-                  gamma: 1,
-                  highlights: 0,
-                  shadows: 0,
-                  whites: 0,
-                  blacks: 0
-                });
-                addToHistory(prevSettings);
-                setActiveEffect(null);
-              }}
+              onClick={resetEffects}
               className="p-2 hover:bg-gray-100 rounded-lg"
             >
               <RotateCcw className="w-5 h-5" />
@@ -289,26 +340,47 @@ export const VideoEffects: React.FC = () => {
         </div>
       </div>
 
+      {/* Live preview of the current look, so the panel is usable on its own */}
+      <div className="mb-4 flex items-center space-x-3 text-xs text-gray-500">
+        <div
+          className="w-24 h-14 rounded-md border border-gray-200 bg-[linear-gradient(135deg,#f87171,#fbbf24,#34d399,#60a5fa)]"
+          style={{ filter: previewFilter }}
+          aria-hidden="true"
+        />
+        <div>
+          <p className="font-medium text-gray-700">
+            {videoEffectsPreview ? 'Preview is live on the player' : 'Preview is hidden'}
+          </p>
+          <p className="truncate max-w-xs" title={previewFilter}>
+            {previewFilter === 'none' ? 'No filters active' : previewFilter}
+          </p>
+        </div>
+      </div>
+
       {/* Presets */}
       <div className="grid grid-cols-3 gap-3 mb-6">
-        {presets.map((preset) => {
+        {sortedPresets.map((preset) => {
           const Icon = preset.icon;
           const isFavorite = favorites.includes(preset.name);
           return (
             <Tooltip key={preset.name} content={preset.description}>
               <div className="relative group">
                 <button
-                  onClick={() => applyPreset(preset)}
-                  className="w-full flex flex-col items-center p-4 rounded-lg border border-gray-200 
-                    hover:border-[#E44E51] hover:bg-[#E44E51]/5 transition-colors"
+                  onClick={() => applyPreset(preset.settings, preset.name)}
+                  className={`w-full flex flex-col items-center p-4 rounded-lg border transition-colors ${
+                    activeEffect === preset.name
+                      ? 'border-[#E44E51] bg-[#E44E51]/5'
+                      : 'border-gray-200 hover:border-[#E44E51] hover:bg-[#E44E51]/5'
+                  }`}
                 >
                   <Icon className="w-6 h-6 mb-2" />
                   <span className="text-sm font-medium">{preset.name}</span>
                 </button>
                 <button
                   onClick={() => toggleFavorite(preset.name)}
+                  title={isFavorite ? 'Remove from favourites' : 'Add to favourites'}
                   className="absolute top-2 right-2 p-1 rounded-full bg-white shadow-lg
-                    opacity-0 group-hover:opacity-100 transition-opacity"
+                    opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
                 >
                   <Star className={`w-4 h-4 ${
                     isFavorite ? 'fill-yellow-400 text-yellow-400' : 'text-gray-400'
@@ -319,6 +391,38 @@ export const VideoEffects: React.FC = () => {
           );
         })}
       </div>
+
+      {/* Presets saved by the user */}
+      {customPresets.length > 0 && (
+        <div className="mb-6">
+          <h4 className="text-sm font-medium text-gray-700 mb-3">My Presets</h4>
+          <div className="grid grid-cols-3 gap-3">
+            {customPresets.map((preset) => (
+              <div key={preset.name} className="relative group">
+                <button
+                  onClick={() => applyPreset(preset.settings, preset.name)}
+                  className={`w-full flex flex-col items-center p-4 rounded-lg border transition-colors ${
+                    activeEffect === preset.name
+                      ? 'border-[#E44E51] bg-[#E44E51]/5'
+                      : 'border-gray-200 hover:border-[#E44E51] hover:bg-[#E44E51]/5'
+                  }`}
+                >
+                  <Bookmark className="w-6 h-6 mb-2" />
+                  <span className="text-sm font-medium truncate max-w-full">{preset.name}</span>
+                </button>
+                <button
+                  onClick={() => removePreset(preset.name)}
+                  title={`Delete ${preset.name}`}
+                  className="absolute top-2 right-2 p-1 rounded-full bg-white shadow-lg text-red-500
+                    opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Effect Categories */}
       <div className="space-y-6">
@@ -347,13 +451,12 @@ export const VideoEffects: React.FC = () => {
                         step={effect.step}
                         value={(videoEffects as unknown as Record<string, number>)[effect.param]}
                         onChange={(e) => {
-                          const newValue = parseFloat(e.target.value);
-                          const prevSettings = { ...videoEffects };
-                          updateVideoEffects({
-                            [effect.param]: newValue
-                          });
-                          addToHistory(prevSettings);
+                          updateVideoEffects({ [effect.param]: parseFloat(e.target.value) });
+                          setActiveEffect(null);
                         }}
+                        // One undo entry per gesture instead of one per pixel.
+                        onPointerUp={() => commitToHistory(videoEffects)}
+                        onKeyUp={() => commitToHistory(videoEffects)}
                         className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer
                           accent-[#E44E51]"
                       />
@@ -370,31 +473,56 @@ export const VideoEffects: React.FC = () => {
         ))}
       </div>
 
-      {/* Save Preset Button */}
+      {/* Save / apply */}
+      {statusMessage && (
+        <p className="mt-6 text-sm text-gray-600 bg-gray-50 rounded-lg p-3">{statusMessage}</p>
+      )}
+
+      {showPresetForm && (
+        <div className="mt-4 flex space-x-2">
+          <input
+            type="text"
+            value={presetName}
+            onChange={(e) => setPresetName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && savePreset()}
+            placeholder="Preset name"
+            autoFocus
+            className="flex-1 rounded-lg border-gray-300 shadow-sm text-sm"
+          />
+          <button
+            onClick={savePreset}
+            className="px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 text-sm"
+          >
+            Save
+          </button>
+          <button
+            onClick={() => {
+              setShowPresetForm(false);
+              setPresetName('');
+            }}
+            className="px-4 py-2 text-gray-600 hover:text-gray-800 text-sm"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
       <div className="mt-6 flex justify-between">
         <button
-          onClick={savePreset}
-          disabled={isSaving}
+          onClick={() => setShowPresetForm((show) => !show)}
           className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200
-            transition-colors disabled:opacity-50"
+            transition-colors"
         >
-          {isSaving ? (
-            <>
-              <Loader className="w-4 h-4 animate-spin inline-block mr-2" />
-              Saving...
-            </>
-          ) : (
-            <>
-              <Bookmark className="w-4 h-4 inline-block mr-2" />
-              Save as Preset
-            </>
-          )}
+          <Bookmark className="w-4 h-4 inline-block mr-2" />
+          Save as Preset
         </button>
         <button
+          onClick={handleApplyEffects}
           className="px-4 py-2 bg-[#E44E51] text-white rounded-lg hover:bg-[#D43B3E]
-            transition-colors shadow-lg hover:shadow-[#E44E51]/25"
+            transition-colors shadow-lg hover:shadow-[#E44E51]/25 flex items-center space-x-2"
         >
-          Apply Effects
+          {isApplied ? <Check className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
+          <span>{isApplied ? 'Effects Applied' : 'Apply Effects'}</span>
         </button>
       </div>
     </div>

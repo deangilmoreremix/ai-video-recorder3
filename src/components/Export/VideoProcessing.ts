@@ -41,6 +41,11 @@ export interface ProcessingOptions {
   stabilize?: boolean;
   denoise?: boolean;
   enhanceColors?: boolean;
+  /**
+   * Extra video filters appended to the chain (e.g. the colour grade coming
+   * from the effects panel). Already formatted as ffmpeg filter strings.
+   */
+  videoFilters?: string[];
   /** x264/x265 speed preset. */
   preset?: string;
   /** x264 profile. */
@@ -564,6 +569,11 @@ export const processVideo = async (
   if (options.stabilize) filters.push('deshake=rx=32:ry=32');
   if (options.denoise) filters.push('hqdn3d=3:3:6:6');
   if (options.enhanceColors) filters.push('eq=contrast=1.1:brightness=0.05:saturation=1.2');
+  // The colour grade from the effects panel runs last, so it sees the final
+  // (scaled / denoised) picture - exactly like the live preview does.
+  if (options.videoFilters?.length) {
+    filters.push(...options.videoFilters.filter((filter) => typeof filter === 'string' && filter.trim()));
+  }
 
   if (watermark) {
     // Overlaying needs a filter graph, which cannot be combined with -vf.

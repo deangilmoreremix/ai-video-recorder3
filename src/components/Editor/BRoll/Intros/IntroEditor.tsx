@@ -26,9 +26,11 @@ const DEVICES: ResponsiveDevice[] = ['mobile', 'tablet', 'desktop'];
 interface IntroEditorProps {
   templateId: string;
   onSave: (data: Pick<IntroSettings, 'text' | 'style' | 'media' | 'advanced'>) => void;
+  /** Fired on every edit so the surrounding preview stays live. */
+  onChange?: (data: Pick<IntroSettings, 'text' | 'style' | 'media' | 'advanced'>) => void;
 }
 
-export const IntroEditor: React.FC<IntroEditorProps> = ({ templateId, onSave }) => {
+export const IntroEditor: React.FC<IntroEditorProps> = ({ templateId, onSave, onChange }) => {
   const template = useIntroStore(state => 
     state.templates.find(t => t.id === templateId)
   );
@@ -75,6 +77,10 @@ export const IntroEditor: React.FC<IntroEditorProps> = ({ templateId, onSave }) 
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
   const [isPreviewMode, setIsPreviewMode] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  // A blob URL carries no MIME, so remember what kind of file was uploaded.
+  const [backgroundIsVideo, setBackgroundIsVideo] = useState(
+    /\.(mp4|webm|mov)$/i.test(template?.settings.media.background ?? '')
+  );
   const previewRef = useRef<HTMLDivElement>(null);
   // Object URLs created for uploaded media, released when the editor unmounts.
   const objectUrls = useRef<string[]>([]);
@@ -88,6 +94,11 @@ export const IntroEditor: React.FC<IntroEditorProps> = ({ templateId, onSave }) 
       urls.length = 0;
     };
   }, []);
+
+  // Keep the surrounding preview in sync with every edit.
+  useEffect(() => {
+    onChange?.({ text, style, media, advanced });
+  }, [advanced, media, onChange, style, text]);
 
   const fonts = [
     'Inter', 'Roboto', 'Montserrat', 'Playfair Display', 'Open Sans',
@@ -137,6 +148,7 @@ export const IntroEditor: React.FC<IntroEditorProps> = ({ templateId, onSave }) 
   const handleMediaUpload = useCallback(async (type: 'background' | 'overlay' | 'logo' | 'music', file: File) => {
     const url = URL.createObjectURL(file);
     objectUrls.current.push(url);
+    if (type === 'background') setBackgroundIsVideo(file.type.startsWith('video'));
     setMedia(prev => {
       const previous = prev[type];
       if (typeof previous === 'string' && previous.startsWith('blob:')) {
@@ -194,11 +206,44 @@ export const IntroEditor: React.FC<IntroEditorProps> = ({ templateId, onSave }) 
           isPreviewMode ? 'mb-6' : 'hidden'
         }`}
       >
+        {/* Uploaded background (image or video) sits behind everything. */}
+        {media.background && (
+          backgroundIsVideo ? (
+            <video
+              src={media.background}
+              muted
+              loop
+              autoPlay
+              playsInline
+              className="absolute inset-0 w-full h-full object-cover"
+            />
+          ) : (
+            <img
+              src={media.background}
+              alt="Intro background"
+              className="absolute inset-0 w-full h-full object-cover"
+            />
+          )
+        )}
+        {media.background && <div className="absolute inset-0 bg-black/40" />}
+
         {/* Preview content */}
         <div 
           className={`absolute inset-0 flex flex-col items-${style.alignment} justify-center p-8`}
           style={{ fontFamily: style.fontFamily }}
         >
+          {media.logo && (
+            <motion.img
+              src={media.logo}
+              alt="Logo"
+              className="h-16 object-contain mb-4"
+              animate={isPlaying ? { opacity: [0, 1], y: [20, 0] } : {}}
+              transition={{
+                duration: style.transitions.duration,
+                ease: style.transitions.easing
+              }}
+            />
+          )}
           <motion.h1 
             className="text-4xl font-bold text-white mb-4"
             style={{ 

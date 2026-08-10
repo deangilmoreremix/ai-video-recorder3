@@ -74,7 +74,7 @@ export const AIFeatureDemo: React.FC<AIFeatureDemoProps> = ({
                   <div className="h-1.5 w-1.5 rounded-full bg-[#E44E51] animate-pulse delay-75"></div>
                   <div className="h-1.5 w-1.5 rounded-full bg-[#E44E51] animate-pulse delay-150"></div>
                 </div>
-                <div className="text-sm text-white">AI processing active</div>
+                <div className="text-sm text-white">Sample footage - AI runs in the recorder</div>
               </div>
             </div>
           </div>

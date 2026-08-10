@@ -48,13 +48,13 @@ const FeaturesList: React.FC = () => {
     },
     {
       title: 'Expression Detection',
-      description: 'Detect facial expressions and emotions',
+      description: 'Classify facial expressions from tracked landmarks',
       icon: Smile,
       category: 'ai'
     },
     {
       title: 'Gesture Recognition',
-      description: 'Control recording with hand gestures',
+      description: 'Recognize hand gestures such as fist, peace and pinch',
       icon: Send,
       category: 'ai'
     },
@@ -97,8 +97,8 @@ const FeaturesList: React.FC = () => {
       category: 'recording'
     },
     {
-      title: 'Multi-device Capture',
-      description: 'Record from multiple cameras simultaneously',
+      title: 'Camera & Mic Selection',
+      description: 'Pick which camera and microphone to record with',
       icon: Grid,
       category: 'recording'
     },

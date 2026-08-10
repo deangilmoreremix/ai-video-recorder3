@@ -1,11 +1,13 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { Type, Image, Settings, Palette, AlignLeft, AlignCenter, AlignRight, Save, Share2, Sparkles, Focus, CloudFog, Eye, Youtube, Instagram, Twitter, Facebook, Globe, Layout, ChevronRight } from 'lucide-react';
+import { Type, Image, Settings, Palette, AlignLeft, AlignCenter, AlignRight, Save, Share2, Sparkles, Focus, CloudFog, Eye, Youtube, Instagram, Twitter, Facebook, Globe, Layout, ChevronRight, ExternalLink, Film, ListVideo, PlaySquare, Loader, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei';
 import { Tooltip } from '../../../ui/Tooltip';
 import { ParticleField } from '../ParticleField';
 import { useOutroStore, type OutroTemplate } from '../../../../store/outroStore';
+import { useBRollStore } from '../../../../store/brollStore';
+import { loadCardImage, recordTitleCard } from '../titleCardRender';
 
 type OutroSettings = OutroTemplate['settings'];
 type OutroText = OutroSettings['text'];
@@ -25,6 +27,39 @@ const DEFAULT_PARTICLES: ParticleSettings = {
 
 const DEVICES: ResponsiveDevice[] = ['mobile', 'tablet', 'desktop'];
 
+/** Where the end card is pinned inside the frame. */
+const END_CARD_POSITIONS: Record<string, string> = {
+  'top-left': 'top-0 left-0',
+  'top-right': 'top-0 right-0',
+  'bottom-left': 'bottom-0 left-0',
+  'bottom-right': 'bottom-0 right-0',
+  left: 'left-0 top-1/2 -translate-y-1/2',
+  right: 'right-0 top-1/2 -translate-y-1/2',
+  center: 'left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2'
+};
+
+const END_CARD_COPY: Record<OutroEndCards['type'], { label: string; hint: string }> = {
+  video: { label: 'Watch next', hint: 'Plays the next video' },
+  playlist: { label: 'View playlist', hint: 'Opens the full playlist' },
+  subscribe: { label: 'Subscribe', hint: 'Subscribe for more' },
+  link: { label: 'Learn more', hint: 'Opens your link' }
+};
+
+const END_CARD_ICONS: Record<OutroEndCards['type'], typeof Film> = {
+  video: PlaySquare,
+  playlist: ListVideo,
+  subscribe: Youtube,
+  link: ExternalLink
+};
+
+/** Open a social/website link, ignoring empty or malformed values. */
+const openLink = (url?: string) => {
+  const value = (url ?? '').trim();
+  if (!value) return;
+  const href = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+  window.open(href, '_blank', 'noopener,noreferrer');
+};
+
 interface OutroEditorProps {
   templateId: string;
   onSave: (data: Pick<OutroSettings, 'text' | 'style' | 'media' | 'endCards' | 'socialLinks' | 'advanced'>) => void;
@@ -34,6 +69,7 @@ export const OutroEditor: React.FC<OutroEditorProps> = ({ templateId, onSave }) 
   const template = useOutroStore(state => 
     state.templates.find(t => t.id === templateId)
   );
+  const addClip = useBRollStore(state => state.addClip);
 
   const [text, setText] = useState<OutroText>(template?.settings.text || {
     title: '',
@@ -101,6 +137,14 @@ export const OutroEditor: React.FC<OutroEditorProps> = ({ templateId, onSave }) 
   // The preview starts visible so the editor always shows the live outro.
   const [isPreviewMode, setIsPreviewMode] = useState(true);
   const [isPlaying, setIsPlaying] = useState(true);
+  // A blob URL carries no MIME, so remember what kind of file was uploaded.
+  const [backgroundIsVideo, setBackgroundIsVideo] = useState(
+    /\.(mp4|webm|mov)$/i.test(template?.settings.media.background ?? '')
+  );
+  const [isRendering, setIsRendering] = useState(false);
+  const [renderProgress, setRenderProgress] = useState(0);
+  const [renderStatus, setRenderStatus] = useState<string | null>(null);
+  const [renderError, setRenderError] = useState<string | null>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   // Object URLs created for uploaded media, released when the editor unmounts.
   const objectUrls = useRef<string[]>([]);
@@ -163,6 +207,7 @@ export const OutroEditor: React.FC<OutroEditorProps> = ({ templateId, onSave }) 
   const handleMediaUpload = useCallback(async (type: 'background' | 'overlay' | 'logo' | 'music', file: File) => {
     const url = URL.createObjectURL(file);
     objectUrls.current.push(url);
+    if (type === 'background') setBackgroundIsVideo(file.type.startsWith('video'));
     setMedia(prev => {
       const previous = prev[type];
       if (typeof previous === 'string' && previous.startsWith('blob:')) {
@@ -176,6 +221,78 @@ export const OutroEditor: React.FC<OutroEditorProps> = ({ templateId, onSave }) 
   const handleSave = async () => {
     onSave({ text, style, media, endCards, socialLinks, advanced });
   };
+
+  /**
+   * Bake the outro into a real video with the shared title-card renderer and
+   * push it onto the B-Roll timeline, where it is exported like any other clip.
+   */
+  const handleAddToTimeline = useCallback(async () => {
+    setIsRendering(true);
+    setRenderProgress(0);
+    setRenderError(null);
+    setRenderStatus(null);
+    try {
+      const [background, logo] = await Promise.all([
+        loadCardImage(backgroundIsVideo ? null : media.background),
+        loadCardImage(media.logo)
+      ]);
+
+      const result = await recordTitleCard(
+        {
+          text: {
+            title: text.title,
+            subtitle: text.subtitle,
+            body: text.endMessage ?? '',
+            callToAction: text.callToAction
+          },
+          style,
+          badge: endCards.enabled
+            ? {
+                label: END_CARD_COPY[endCards.type].label,
+                position: endCards.position,
+                delay: endCards.delay,
+                duration: endCards.duration,
+                opacity: endCards.style.opacity,
+                scale: endCards.style.scale,
+                shadow: endCards.style.shadow
+              }
+            : null
+        },
+        { background, logo },
+        { onProgress: setRenderProgress }
+      );
+
+      addClip({
+        name: `${template?.name ?? 'Outro'} (outro)`,
+        url: URL.createObjectURL(result.blob),
+        thumbnail: result.thumbnail,
+        duration: result.duration,
+        type: 'video',
+        category: 'outro',
+        tags: ['outro'],
+        metadata: {
+          fileSize: result.blob.size,
+          resolution: `${result.width}x${result.height}`,
+          codec: result.blob.type,
+          fps: 30
+        }
+      });
+      setRenderStatus('Added to the B-Roll timeline');
+    } catch (error) {
+      setRenderError(error instanceof Error ? error.message : 'Rendering the outro failed.');
+    } finally {
+      setIsRendering(false);
+    }
+  }, [
+    addClip,
+    backgroundIsVideo,
+    endCards,
+    media.background,
+    media.logo,
+    style,
+    template?.name,
+    text
+  ]);
 
   const togglePreviewMode = () => {
     setIsPreviewMode(!isPreviewMode);
@@ -191,7 +308,13 @@ export const OutroEditor: React.FC<OutroEditorProps> = ({ templateId, onSave }) 
       {/* Header */}
       <div className="flex justify-between items-center">
         <h3 className="text-lg font-semibold">Customize Outro</h3>
-        <div className="flex space-x-2">
+        <div className="flex items-center space-x-2">
+          {renderStatus && (
+            <span className="flex items-center text-sm text-emerald-600">
+              <Check className="w-4 h-4 mr-1" />
+              {renderStatus}
+            </span>
+          )}
           <Tooltip content="Toggle preview">
             <button
               onClick={togglePreviewMode}
@@ -200,6 +323,26 @@ export const OutroEditor: React.FC<OutroEditorProps> = ({ templateId, onSave }) 
               }`}
             >
               <Eye className="w-5 h-5" />
+            </button>
+          </Tooltip>
+          <Tooltip content="Render this outro and add it to the B-Roll timeline">
+            <button
+              onClick={handleAddToTimeline}
+              disabled={isRendering}
+              className="px-4 py-2 border border-gray-200 rounded-lg hover:bg-gray-50
+                disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+            >
+              {isRendering ? (
+                <>
+                  <Loader className="w-4 h-4 mr-2 animate-spin" />
+                  Rendering… {renderProgress}%
+                </>
+              ) : (
+                <>
+                  <Film className="w-4 h-4 mr-2" />
+                  Add to B-Roll
+                </>
+              )}
             </button>
           </Tooltip>
           <button 
@@ -213,6 +356,8 @@ export const OutroEditor: React.FC<OutroEditorProps> = ({ templateId, onSave }) 
         </div>
       </div>
 
+      {renderError && <p className="text-sm text-[#E44E51]">{renderError}</p>}
+
       {/* Preview Area */}
       <div 
         ref={previewRef}
@@ -220,11 +365,44 @@ export const OutroEditor: React.FC<OutroEditorProps> = ({ templateId, onSave }) 
           isPreviewMode ? 'mb-6' : 'hidden'
         }`}
       >
+        {/* Uploaded background (image or video) sits behind everything. */}
+        {media.background && (
+          backgroundIsVideo ? (
+            <video
+              src={media.background}
+              muted
+              loop
+              autoPlay
+              playsInline
+              className="absolute inset-0 w-full h-full object-cover"
+            />
+          ) : (
+            <img
+              src={media.background}
+              alt="Outro background"
+              className="absolute inset-0 w-full h-full object-cover"
+            />
+          )
+        )}
+        {media.background && <div className="absolute inset-0 bg-black/40" />}
+
         {/* Preview content */}
         <div 
           className={`absolute inset-0 flex flex-col items-${style.alignment} justify-center p-8`}
           style={{ fontFamily: style.fontFamily }}
         >
+          {media.logo && (
+            <motion.img
+              src={media.logo}
+              alt="Logo"
+              className="h-16 object-contain mb-4"
+              animate={isPlaying ? { opacity: [0, 1], y: [20, 0] } : {}}
+              transition={{
+                duration: style.transitions.duration,
+                ease: style.transitions.easing
+              }}
+            />
+          )}
           <motion.h1 
             className="text-4xl font-bold text-white mb-4"
             style={{ 
@@ -346,17 +524,23 @@ export const OutroEditor: React.FC<OutroEditorProps> = ({ templateId, onSave }) 
 
         {/* End Cards */}
         {endCards.enabled && (
-          <div className={`absolute ${endCards.position} p-4`}>
+          <div
+            className={`absolute p-4 ${
+              END_CARD_POSITIONS[endCards.position] ?? END_CARD_POSITIONS['bottom-right']
+            }`}
+          >
             <motion.div
-              className="bg-black/80 backdrop-blur-sm rounded-lg overflow-hidden"
+              className={`rounded-lg overflow-hidden ${
+                endCards.style.blur ? 'bg-black/50 backdrop-blur-md' : 'bg-black/80'
+              }`}
               style={{
                 opacity: endCards.style.opacity,
                 transform: `scale(${endCards.style.scale})`,
                 boxShadow: endCards.style.shadow ? '0 4px 12px rgba(0,0,0,0.3)' : 'none'
               }}
               animate={isPlaying ? {
-                opacity: [0, 1],
-                scale: [0.9, 1]
+                opacity: [0, endCards.style.opacity],
+                scale: [0.9, endCards.style.scale]
               } : {}}
               transition={{
                 duration: style.transitions.duration,
@@ -365,6 +549,34 @@ export const OutroEditor: React.FC<OutroEditorProps> = ({ templateId, onSave }) 
               }}
             >
               {/* End card content */}
+              {(() => {
+                const Icon = END_CARD_ICONS[endCards.type];
+                const copy = END_CARD_COPY[endCards.type];
+                const target =
+                  endCards.type === 'link'
+                    ? socialLinks.website
+                    : socialLinks.youtube;
+                return (
+                  <button
+                    type="button"
+                    onClick={() => openLink(target)}
+                    disabled={!target}
+                    className="flex items-center space-x-3 px-4 py-3 text-left disabled:cursor-default"
+                  >
+                    <span className="w-10 h-10 rounded-lg bg-[#E44E51] flex items-center justify-center shrink-0">
+                      <Icon className="w-5 h-5 text-white" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-semibold text-white truncate">
+                        {copy.label}
+                      </span>
+                      <span className="block text-xs text-gray-300 truncate max-w-[12rem]">
+                        {target || copy.hint}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })()}
             </motion.div>
           </div>
         )}
@@ -607,9 +819,17 @@ export const OutroEditor: React.FC<OutroEditorProps> = ({ templateId, onSave }) 
                     className="flex-1 rounded-lg border-gray-300 shadow-sm"
                     placeholder="https://youtube.com/@channel"
                   />
-                  <button className="p-2 hover:bg-gray-100 rounded-lg">
-                    <Youtube className="w-4 h-4" />
-                  </button>
+                  <Tooltip content={socialLinks.youtube ? 'Open this link' : 'Add a URL first'}>
+                    <button
+                      type="button"
+                      onClick={() => openLink(socialLinks.youtube)}
+                      disabled={!socialLinks.youtube}
+                      aria-label="Open YouTube link"
+                      className="p-2 hover:bg-gray-100 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <Youtube className="w-4 h-4" />
+                    </button>
+                  </Tooltip>
                 </div>
               </div>
               <div>
@@ -627,9 +847,17 @@ export const OutroEditor: React.FC<OutroEditorProps> = ({ templateId, onSave }) 
                     className="flex-1 rounded-lg border-gray-300 shadow-sm"
                     placeholder="https://instagram.com/username"
                   />
-                  <button className="p-2 hover:bg-gray-100 rounded-lg">
-                    <Instagram className="w-4 h-4" />
-                  </button>
+                  <Tooltip content={socialLinks.instagram ? 'Open this link' : 'Add a URL first'}>
+                    <button
+                      type="button"
+                      onClick={() => openLink(socialLinks.instagram)}
+                      disabled={!socialLinks.instagram}
+                      aria-label="Open Instagram link"
+                      className="p-2 hover:bg-gray-100 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <Instagram className="w-4 h-4" />
+                    </button>
+                  </Tooltip>
                 </div>
               </div>
               <div>
@@ -647,9 +875,17 @@ export const OutroEditor: React.FC<OutroEditorProps> = ({ templateId, onSave }) 
                     className="flex-1 rounded-lg border-gray-300 shadow-sm"
                     placeholder="https://twitter.com/username"
                   />
-                  <button className="p-2 hover:bg-gray-100 rounded-lg">
-                    <Twitter className="w-4 h-4" />
-                  </button>
+                  <Tooltip content={socialLinks.twitter ? 'Open this link' : 'Add a URL first'}>
+                    <button
+                      type="button"
+                      onClick={() => openLink(socialLinks.twitter)}
+                      disabled={!socialLinks.twitter}
+                      aria-label="Open Twitter link"
+                      className="p-2 hover:bg-gray-100 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <Twitter className="w-4 h-4" />
+                    </button>
+                  </Tooltip>
                 </div>
               </div>
               <div>
@@ -667,9 +903,17 @@ export const OutroEditor: React.FC<OutroEditorProps> = ({ templateId, onSave }) 
                     className="flex-1 rounded-lg border-gray-300 shadow-sm"
                     placeholder="https://example.com"
                   />
-                  <button className="p-2 hover:bg-gray-100 rounded-lg">
-                    <Globe className="w-4 h-4" />
-                  </button>
+                  <Tooltip content={socialLinks.website ? 'Open this link' : 'Add a URL first'}>
+                    <button
+                      type="button"
+                      onClick={() => openLink(socialLinks.website)}
+                      disabled={!socialLinks.website}
+                      aria-label="Open website link"
+                      className="p-2 hover:bg-gray-100 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <Globe className="w-4 h-4" />
+                    </button>
+                  </Tooltip>
                 </div>
               </div>
             </div>

@@ -3,6 +3,7 @@ import { Layout, Link, Video, Trash2, Eye, EyeOff, Copy, Layers, Youtube, Extern
 import { Tooltip } from '../ui/Tooltip';
 import { motion, AnimatePresence } from 'framer-motion';
 import { nanoid } from 'nanoid';
+import { openExternalUrl } from '../../utils/links';
 
 interface EndCard {
   id: string;
@@ -398,9 +399,17 @@ export const EndCards: React.FC = () => {
                   className="flex-1 rounded-lg border-gray-300"
                   placeholder="https://"
                 />
-                <button className="p-2 hover:bg-gray-100 rounded-lg">
-                  <ExternalLink className="w-4 h-4" />
-                </button>
+                 <button
+                   onClick={() => {
+                     const card = endCards.find(c => c.id === selectedCard);
+                     if (card?.url) openExternalUrl(card.url);
+                   }}
+                   disabled={!endCards.find(c => c.id === selectedCard)?.url}
+                   title="Open card link"
+                   className="p-2 hover:bg-gray-100 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed"
+                 >
+                   <ExternalLink className="w-4 h-4" />
+                 </button>
               </div>
             </div>
 

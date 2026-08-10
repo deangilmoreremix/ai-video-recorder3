@@ -83,8 +83,8 @@ const ALL_FEATURES: FeatureTile[] = [
       color: 'from-green-500 to-emerald-600',
       details: [
         'No green screen needed',
-        'Adjustable edge detection',
-        'Custom background replacement',
+        'Adjustable segmentation threshold',
+        'Background keyed to green for compositing',
         'Professional-looking results'
       ],
       link: '/features/ai'
@@ -131,7 +131,7 @@ const ALL_FEATURES: FeatureTile[] = [
       details: [
         'Capture entire screen or specific window',
         'System audio recording',
-        'Mouse click visualization',
+        'Optional 3-2-1 countdown',
         'Multiple monitor support'
       ],
       link: '/features/recorder'
@@ -191,8 +191,8 @@ const ALL_FEATURES: FeatureTile[] = [
       icon: Type,
       color: 'from-blue-500 to-cyan-600',
       details: [
-        'AI-powered speech recognition',
-        'Multiple language support',
+        'Browser speech recognition (Web Speech API)',
+        'English (en-US) transcription',
         'Editable caption text',
         'Style and position customization'
       ],

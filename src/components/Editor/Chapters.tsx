@@ -3,6 +3,7 @@ import { BookOpen, Plus, Clock, Edit2, Trash2, ChevronUp, ChevronDown, Settings,
 import { Tooltip } from '../ui/Tooltip';
 import { nanoid } from 'nanoid';
 import { decodeAudio, computeEnergy, detectChapters, type DetectedChapter } from './audioAnalysis';
+import { openExternalUrl } from '../../utils/links';
 
 interface Chapter {
   id: string;
@@ -636,9 +637,14 @@ export const Chapters: React.FC<ChaptersProps> = ({ videoRef, videoUrl }) => {
                       className="flex-1 rounded-lg border-gray-300 text-sm"
                       placeholder="https://"
                     />
-                    <button className="p-2 hover:bg-gray-100 rounded-lg">
-                      <Link className="w-4 h-4" />
-                    </button>
+                     <button
+                       onClick={() => chapter.url && openExternalUrl(chapter.url)}
+                       disabled={!chapter.url}
+                       title={chapter.url || 'Add a link above'}
+                       className="p-2 hover:bg-gray-100 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed"
+                     >
+                       <Link className="w-4 h-4" />
+                     </button>
                   </div>
                 </div>
               </div>

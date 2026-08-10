@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Film, Trash2, Edit2, Clock, Play, Grid, List, Search, Filter, X, Folder, Brain, Star } from 'lucide-react';
+import { Film, Trash2, Edit2, Clock, Play, Grid, List, Search, Filter, X, Folder, Brain, Star, Layers } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useDropzone } from 'react-dropzone';
 import { DragDropContext, Droppable, Draggable, type DropResult } from 'react-beautiful-dnd';
 import { useBRollStore, type BRollClip, type BRollMediaType } from '../../../store/brollStore';
 import { MediaPreview } from './Preview/MediaPreview';
 import { AIFeatures } from './AIFeatures';
+import { BatchProcessor, type BatchSettings } from './BatchProcessor';
 
 interface MediaFileMetadata {
   duration: number;
@@ -28,6 +29,16 @@ const DEFAULT_FILTERS: ClipFilters = {
 };
 
 const EMPTY_METADATA: MediaFileMetadata = { duration: 0, resolution: '', fps: 0 };
+
+/** Import rules used by the plain dropzone (the batch panel supplies its own). */
+const DEFAULT_BATCH_SETTINGS: BatchSettings = {
+  autoTag: true,
+  categorize: true,
+  generateThumbnails: true,
+  extractMetadata: true,
+  batchRename: false,
+  renamePattern: '{index}-{name}'
+};
 
 const getMediaType = (file: File): BRollMediaType => {
   if (file.type.startsWith('video')) return 'video';
@@ -117,6 +128,31 @@ const generateThumbnail = (file: File): Promise<string> =>
     video.src = url;
   });
 
+/** Apply a `{index}` / `{name}` rename pattern to an imported file. */
+const applyRenamePattern = (pattern: string, index: number, fileName: string): string => {
+  const dot = fileName.lastIndexOf('.');
+  const base = dot > 0 ? fileName.slice(0, dot) : fileName;
+  const extension = dot > 0 ? fileName.slice(dot) : '';
+  const renamed = pattern
+    .replace(/\{index\}/g, String(index + 1).padStart(2, '0'))
+    .replace(/\{name\}/g, base)
+    .trim();
+  if (!renamed) return fileName;
+  return renamed.includes('.') ? renamed : `${renamed}${extension}`;
+};
+
+/** Tags derived from what we actually measured about the file. */
+const buildAutoTags = (type: BRollMediaType, metadata: MediaFileMetadata): string[] => {
+  const tags: string[] = [type];
+  const width = Number(metadata.resolution.split('x')[0] ?? 0);
+  if (width >= 3840) tags.push('4k');
+  else if (width >= 1920) tags.push('1080p');
+  else if (width >= 1280) tags.push('720p');
+  else if (width > 0) tags.push('sd');
+  if (metadata.duration > 0) tags.push(metadata.duration <= 10 ? 'short' : 'long');
+  return tags;
+};
+
 export const BRollManager: React.FC = () => {
   const clips = useBRollStore((state) => state.clips);
   const selectedClipId = useBRollStore((state) => state.selectedClipId);
@@ -132,8 +168,9 @@ export const BRollManager: React.FC = () => {
   const [showPreview, setShowPreview] = useState(false);
   const [previewClipId, setPreviewClipId] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [importProgress, setImportProgress] = useState(0);
+  const [showBatch, setShowBatch] = useState(false);
   const [showAIProcessing, setShowAIProcessing] = useState(false);
-  const [aiFeatures, setAiFeatures] = useState<Record<string, boolean>>({});
   const [searchQuery, setSearchQuery] = useState('');
   const [filters, setFilters] = useState<ClipFilters>(DEFAULT_FILTERS);
   const [importError, setImportError] = useState<string | null>(null);
@@ -152,43 +189,49 @@ export const BRollManager: React.FC = () => {
     setFilters((prev) => ({ ...prev, ...updates }));
   }, []);
 
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    accept: {
-      'video/*': [],
-      'image/*': [],
-      'audio/*': []
-    },
-    onDrop: async (acceptedFiles) => {
-      if (!acceptedFiles.length) return;
+  /**
+   * Shared import routine used by the dropzone and by the batch panel. Each
+   * file is imported independently so one bad asset cannot abort the batch.
+   */
+  const importFiles = useCallback(
+    async (files: File[], settings: BatchSettings = DEFAULT_BATCH_SETTINGS) => {
+      if (!files.length) return;
 
       setIsProcessing(true);
+      setImportProgress(0);
       setImportError(null);
       const failed: string[] = [];
 
-      // Each file is imported independently so one bad asset cannot abort the batch.
-      for (const file of acceptedFiles) {
+      for (let index = 0; index < files.length; index += 1) {
+        const file = files[index];
         let url: string | undefined;
         let thumbnail: string | undefined;
 
         try {
           const type = getMediaType(file);
-          const metadata = await getFileMetadata(file);
+          const metadata = settings.extractMetadata ? await getFileMetadata(file) : EMPTY_METADATA;
           url = URL.createObjectURL(file);
           createdUrls.current.push(url);
 
-          thumbnail = type === 'image' ? url : await generateThumbnail(file);
-          if (thumbnail && thumbnail !== url && thumbnail.startsWith('blob:')) {
-            createdUrls.current.push(thumbnail);
+          if (settings.generateThumbnails) {
+            thumbnail = type === 'image' ? url : await generateThumbnail(file);
+            if (thumbnail && thumbnail !== url && thumbnail.startsWith('blob:')) {
+              createdUrls.current.push(thumbnail);
+            }
+          } else {
+            thumbnail = '';
           }
 
           addClip({
-            name: file.name,
+            name: settings.batchRename
+              ? applyRenamePattern(settings.renamePattern, index, file.name)
+              : file.name,
             url,
             thumbnail,
             duration: metadata.duration,
             type,
-            category: 'uncategorized',
-            tags: [],
+            category: settings.categorize ? type : 'uncategorized',
+            tags: settings.autoTag ? buildAutoTags(type, metadata) : [],
             favorite: false,
             lastUsed: new Date(),
             metadata: {
@@ -202,10 +245,13 @@ export const BRollManager: React.FC = () => {
           console.error(`Failed to import "${file.name}":`, error);
           failed.push(file.name);
           if (url) {
-            URL.revokeObjectURL(url);
-            createdUrls.current = createdUrls.current.filter((entry) => entry !== url);
+            const created = url;
+            URL.revokeObjectURL(created);
+            createdUrls.current = createdUrls.current.filter((entry) => entry !== created);
           }
         }
+
+        setImportProgress(Math.round(((index + 1) / files.length) * 100));
       }
 
       if (failed.length) {
@@ -214,6 +260,18 @@ export const BRollManager: React.FC = () => {
         );
       }
       setIsProcessing(false);
+    },
+    [addClip]
+  );
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    accept: {
+      'video/*': [],
+      'image/*': [],
+      'audio/*': []
+    },
+    onDrop: (acceptedFiles) => {
+      void importFiles(acceptedFiles);
     }
   });
 
@@ -267,6 +325,11 @@ export const BRollManager: React.FC = () => {
     [clips, previewClipId]
   );
 
+  const selectedClip = useMemo(
+    () => (selectedClipId ? clips.find((clip) => clip.id === selectedClipId) ?? null : null),
+    [clips, selectedClipId]
+  );
+
   const closePreview = useCallback(() => {
     setShowPreview(false);
     setPreviewClipId(null);
@@ -306,6 +369,15 @@ export const BRollManager: React.FC = () => {
         </div>
 
         <div className="flex items-center space-x-2">
+          <button
+            onClick={() => setShowBatch(!showBatch)}
+            className={`p-2 rounded-lg ${
+              showBatch ? 'bg-[#E44E51]/10 text-[#E44E51]' : 'hover:bg-gray-100'
+            }`}
+            title="Batch import"
+          >
+            <Layers className="w-5 h-5" />
+          </button>
           <button
             onClick={() => setShowAIProcessing(!showAIProcessing)}
             className={`p-2 rounded-lg ${
@@ -460,6 +532,23 @@ export const BRollManager: React.FC = () => {
         </AnimatePresence>
       </div>
 
+      {showBatch && (
+        <div className="p-4 border rounded-lg space-y-3">
+          <div>
+            <h4 className="font-medium">Batch import</h4>
+            <p className="text-sm text-gray-500">
+              Queue several files, then import them all with the same naming, tagging and thumbnail
+              rules.
+            </p>
+          </div>
+          <BatchProcessor
+            onProcess={importFiles}
+            isProcessing={isProcessing}
+            progress={importProgress}
+          />
+        </div>
+      )}
+
       {/* Dropzone */}
       <div
         {...getRootProps()}
@@ -613,14 +702,7 @@ export const BRollManager: React.FC = () => {
       )}
 
       {/* AI Processing Features */}
-      {showAIProcessing && (
-        <AIFeatures
-          onFeatureToggle={(feature, enabled) =>
-            setAiFeatures((prev) => ({ ...prev, [feature]: enabled }))
-          }
-          enabledFeatures={aiFeatures}
-        />
-      )}
+      {showAIProcessing && <AIFeatures clip={selectedClip} />}
     </div>
   );
 };

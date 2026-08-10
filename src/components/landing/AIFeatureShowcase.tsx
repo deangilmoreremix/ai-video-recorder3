@@ -34,7 +34,7 @@ const AIFeatureShowcase: React.FC = () => {
     {
       id: 'beauty-filters',
       title: 'Beauty Filters',
-      description: 'Enhance your appearance subtly with AI-powered beauty filters that adapt to lighting conditions.',
+      description: 'Smooth skin on detected faces with an edge-preserving filter applied live while you record.',
       icon: Wand2,
       video: 'https://assets.mixkit.co/videos/preview/mixkit-portrait-of-a-young-model-posing-during-a-shoot-43929-large.mp4',
       fallbackImage: 'https://images.unsplash.com/photo-1487412947147-5cebf100ffc2?auto=format&fit=crop&w=800&q=80'
@@ -55,7 +55,7 @@ const AIFeatureShowcase: React.FC = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative">
         <div className="text-center mb-16">
           <h2 className="text-3xl sm:text-4xl font-bold text-white">Experience AI-Powered Video Enhancement</h2>
-          <p className="mt-4 text-xl text-gray-300">See how our AI features transform your recordings in real-time</p>
+          <p className="mt-4 text-xl text-gray-300">Illustrated previews of the effects the recorder applies to your video in real time</p>
         </div>
         
         <div className="md:flex md:items-start md:space-x-8">
@@ -136,7 +136,7 @@ const AIFeatureShowcase: React.FC = () => {
                         <activeFeatureData.icon className="w-4 h-4 mr-1" aria-hidden="true" />
                         {activeFeatureData.title}
                       </span>
-                      <div className="mt-2 text-xs text-white/80">AI processing applied in real-time</div>
+                      <div className="mt-2 text-xs text-white/80">Illustrated preview - the AI runs live in the recorder</div>
                     </div>
                   </div>
                   

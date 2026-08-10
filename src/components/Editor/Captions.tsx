@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Users, Settings, Mic, Wand2, Clock, Edit2, Download, Upload, Palette, Plus, Trash2, AlignLeft, AlignCenter, AlignRight, AlertCircle } from 'lucide-react';
+import { Users, Settings, Mic, Wand2, Clock, Edit2, Download, Upload, Palette, Plus, Trash2, AlignLeft, AlignCenter, AlignRight, AlertCircle, Square } from 'lucide-react';
 import { Tooltip } from '../ui/Tooltip';
 import { nanoid } from 'nanoid';
+import { buildFileName, downloadBlob } from '../Export/VideoProcessing';
 
 interface Caption {
   id: string;
@@ -57,6 +58,89 @@ interface CaptionsProps {
   videoUrl?: string | null;
 }
 
+type CaptionFormat = 'srt' | 'vtt' | 'json';
+
+/** Languages the Web Speech API is asked to transcribe in. */
+const RECOGNITION_LANGUAGES = [
+  { code: 'en-US', label: 'English (US)' },
+  { code: 'en-GB', label: 'English (UK)' },
+  { code: 'es-ES', label: 'Spanish' },
+  { code: 'fr-FR', label: 'French' },
+  { code: 'de-DE', label: 'German' },
+  { code: 'it-IT', label: 'Italian' },
+  { code: 'pt-BR', label: 'Portuguese (BR)' },
+  { code: 'nl-NL', label: 'Dutch' },
+  { code: 'hi-IN', label: 'Hindi' },
+  { code: 'ja-JP', label: 'Japanese' }
+];
+
+/** A pause longer than this is treated as a change of speaker. */
+const SPEAKER_TURN_GAP = 1.2;
+
+/** `hh:mm:ss,mmm` (SRT) / `hh:mm:ss.mmm` (WebVTT). */
+const formatTimestamp = (seconds: number, separator: ',' | '.'): string => {
+  const safe = Number.isFinite(seconds) && seconds > 0 ? seconds : 0;
+  const hours = Math.floor(safe / 3600);
+  const minutes = Math.floor((safe % 3600) / 60);
+  const secs = Math.floor(safe % 60);
+  const ms = Math.round((safe % 1) * 1000);
+  const pad = (value: number, size = 2) => value.toString().padStart(size, '0');
+  return `${pad(hours)}:${pad(minutes)}:${pad(secs)}${separator}${pad(ms, 3)}`;
+};
+
+/** Parses `hh:mm:ss,mmm` / `mm:ss.mmm` into seconds. */
+const parseTimestamp = (value: string): number | null => {
+  const match = value.trim().match(/^(?:(\d+):)?(\d{1,2}):(\d{1,2})(?:[.,](\d{1,3}))?$/);
+  if (!match) return null;
+  const [, hours, minutes, seconds, millis] = match;
+  return (
+    (hours ? parseInt(hours, 10) : 0) * 3600 +
+    parseInt(minutes, 10) * 60 +
+    parseInt(seconds, 10) +
+    (millis ? parseInt(millis.padEnd(3, '0'), 10) / 1000 : 0)
+  );
+};
+
+/**
+ * Reads SubRip (.srt) and WebVTT (.vtt) cues. Cue numbers, `WEBVTT` headers,
+ * `NOTE` blocks and cue settings after the timing line are all ignored, and a
+ * `Speaker: text` prefix is lifted into the speaker field.
+ */
+const parseCaptionFile = (
+  content: string
+): Array<{ text: string; startTime: number; endTime: number; speaker?: string }> => {
+  const cues: Array<{ text: string; startTime: number; endTime: number; speaker?: string }> = [];
+  const blocks = content.replace(/\r/g, '').split(/\n{2,}/);
+
+  for (const block of blocks) {
+    const lines = block.split('\n').filter((line) => line.trim().length > 0);
+    if (lines.length === 0) continue;
+    if (/^WEBVTT/i.test(lines[0]) && lines.length === 1) continue;
+    if (/^NOTE\b/i.test(lines[0])) continue;
+
+    const timingIndex = lines.findIndex((line) => line.includes('-->'));
+    if (timingIndex === -1) continue;
+
+    const [rawStart, rawRest] = lines[timingIndex].split('-->');
+    const startTime = parseTimestamp(rawStart ?? '');
+    const endTime = parseTimestamp((rawRest ?? '').trim().split(/\s+/)[0] ?? '');
+    if (startTime === null || endTime === null) continue;
+
+    const body = lines.slice(timingIndex + 1).join('\n').trim();
+    if (!body) continue;
+
+    const speakerMatch = body.match(/^(?:<v\s+([^>]+)>|([A-Za-z0-9 _-]{1,24}):)\s*/);
+    cues.push({
+      startTime,
+      endTime: Math.max(endTime, startTime),
+      speaker: speakerMatch ? (speakerMatch[1] ?? speakerMatch[2]).trim() : undefined,
+      text: speakerMatch ? body.slice(speakerMatch[0].length).trim() : body
+    });
+  }
+
+  return cues;
+};
+
 export const Captions: React.FC<CaptionsProps> = ({ videoRef, videoUrl }) => {
   const [captions, setCaptions] = useState<Caption[]>([]);
   const [selectedCaption, setSelectedCaption] = useState<string | null>(null);
@@ -64,11 +148,15 @@ export const Captions: React.FC<CaptionsProps> = ({ videoRef, videoUrl }) => {
   const [status, setStatus] = useState<string | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const segmentStartRef = useRef(0);
+  const speakerRef = useRef(1);
+  const lastEndRef = useRef(0);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   const [settings, setSettings] = useState({
     autoGenerate: true,
-    autoTranslate: false,
     speakerDetection: true,
+    language: 'en-US',
+    exportFormat: 'srt' as CaptionFormat,
     style: {
       font: 'Arial',
       size: 16,
@@ -81,6 +169,7 @@ export const Captions: React.FC<CaptionsProps> = ({ videoRef, videoUrl }) => {
   });
 
   const [showStyleEditor, setShowStyleEditor] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => {
     // Stop any in-flight recognition if the component unmounts.
@@ -90,7 +179,7 @@ export const Captions: React.FC<CaptionsProps> = ({ videoRef, videoUrl }) => {
     };
   }, []);
 
-  const appendCaption = (text: string, start: number, end: number) => {
+  const appendCaption = (text: string, start: number, end: number, speaker?: string) => {
     setCaptions(prev => [
       ...prev,
       {
@@ -98,7 +187,8 @@ export const Captions: React.FC<CaptionsProps> = ({ videoRef, videoUrl }) => {
         text,
         startTime: start,
         endTime: end,
-        language: 'en',
+        language: settings.language.split('-')[0],
+        speaker,
         style: {
           position: settings.style.position as 'top' | 'bottom',
           alignment: settings.style.alignment as 'left' | 'center' | 'right',
@@ -130,7 +220,7 @@ export const Captions: React.FC<CaptionsProps> = ({ videoRef, videoUrl }) => {
     const recognition = new SpeechRecognitionCtor();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = 'en-US';
+    recognition.lang = settings.language;
 
     recognition.onresult = (event) => {
       const video = videoRef.current;
@@ -141,7 +231,18 @@ export const Captions: React.FC<CaptionsProps> = ({ videoRef, videoUrl }) => {
           if (!text) continue;
           const end = video ? video.currentTime : segmentStartRef.current;
           const start = segmentStartRef.current;
-          appendCaption(text, start, end);
+
+          let speaker: string | undefined;
+          if (settings.speakerDetection) {
+            // A long pause between segments marks a new speaker turn.
+            if (start - lastEndRef.current > SPEAKER_TURN_GAP) {
+              speakerRef.current += 1;
+            }
+            speaker = `Speaker ${speakerRef.current}`;
+          }
+          lastEndRef.current = end;
+
+          appendCaption(text, start, end, speaker);
           segmentStartRef.current = end;
         }
       }
@@ -160,6 +261,7 @@ export const Captions: React.FC<CaptionsProps> = ({ videoRef, videoUrl }) => {
 
     recognitionRef.current = recognition;
     segmentStartRef.current = videoRef.current ? videoRef.current.currentTime : 0;
+    lastEndRef.current = segmentStartRef.current;
 
     // Play the video so its audio is available to the recognizer.
     videoRef.current?.play().catch(() => undefined);
@@ -168,6 +270,14 @@ export const Captions: React.FC<CaptionsProps> = ({ videoRef, videoUrl }) => {
     } catch {
       // start() throws if called while already running; ignore.
     }
+  };
+
+  const stopRecognition = () => {
+    if (!recognitionRef.current) return;
+    recognitionRef.current.stop();
+    recognitionRef.current = null;
+    setProcessing(false);
+    setStatus('Transcription stopped.');
   };
 
   const addCaption = () => {
@@ -209,21 +319,135 @@ export const Captions: React.FC<CaptionsProps> = ({ videoRef, videoUrl }) => {
     return `${pad(mins)}:${pad(secs)}.${ms.toString().padStart(3, '0')}`;
   };
 
+  const exportCaptions = () => {
+    const format = settings.exportFormat;
+    const sorted = [...captions]
+      .filter(caption => caption.text.trim().length > 0)
+      .sort((a, b) => a.startTime - b.startTime);
+
+    if (sorted.length === 0) {
+      setStatus('Nothing to export — add or generate some captions first.');
+      return;
+    }
+
+    const speakerPrefix = (speaker?: string) => (speaker ? `${speaker}: ` : '');
+
+    let content: string;
+    let mime: string;
+    let extension: string;
+
+    if (format === 'vtt') {
+      content = 'WEBVTT\n\n' + sorted
+        .map((caption, index) => {
+          const text = caption.speaker
+            ? `<v ${caption.speaker}>${caption.text}`
+            : caption.text;
+          return `${index + 1}\n${formatTimestamp(caption.startTime, '.')} --> ${formatTimestamp(
+            caption.endTime,
+            '.'
+          )}\n${text}`;
+        })
+        .join('\n\n');
+      mime = 'text/vtt';
+      extension = 'vtt';
+    } else if (format === 'json') {
+      content = JSON.stringify(
+        sorted.map(({ id, text, startTime, endTime, speaker, language }) => ({
+          id,
+          text,
+          startTime,
+          endTime,
+          speaker,
+          language
+        })),
+        null,
+        2
+      );
+      mime = 'application/json';
+      extension = 'json';
+    } else {
+      content = sorted
+        .map((caption, index) => {
+          const text = speakerPrefix(caption.speaker) + caption.text;
+          return `${index + 1}\n${formatTimestamp(caption.startTime, ',')} --> ${formatTimestamp(
+            caption.endTime,
+            ','
+          )}\n${text}`;
+        })
+        .join('\n\n');
+      mime = 'text/plain';
+      extension = 'srt';
+    }
+
+    const blob = new Blob([content], { type: mime });
+    downloadBlob(blob, buildFileName('captions', extension));
+    setStatus(`Exported ${sorted.length} captions as ${extension.toUpperCase()}.`);
+  };
+
+  const importCaptions = async (file: File) => {
+    try {
+      const content = await file.text();
+      const parsed = parseCaptionFile(content);
+      if (parsed.length === 0) {
+        setStatus('No timed cues were found in that file.');
+        return;
+      }
+      setCaptions(
+        parsed.map(({ text, startTime, endTime, speaker }) => ({
+          id: nanoid(),
+          text,
+          startTime,
+          endTime,
+          language: 'en',
+          speaker,
+          style: {
+            position: settings.style.position as 'top' | 'bottom',
+            alignment: settings.style.alignment as 'left' | 'center' | 'right',
+            fontSize: settings.style.size,
+            color: settings.style.color,
+            background: settings.style.background,
+            opacity: settings.style.opacity
+          }
+        }))
+      );
+      setStatus(`Imported ${parsed.length} captions.`);
+    } catch {
+      setStatus('That file could not be read or parsed.');
+    }
+  };
+
   return (
     <div className="bg-white rounded-lg shadow-lg p-4">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-lg font-semibold">Captions</h3>
         <div className="flex space-x-2">
-          <Tooltip content="Import captions file">
-            <button className="p-2 hover:bg-gray-100 rounded-lg">
+          <Tooltip content="Import .srt or .vtt">
+            <button
+              onClick={() => importInputRef.current?.click()}
+              className="p-2 hover:bg-gray-100 rounded-lg"
+            >
               <Upload className="w-5 h-5" />
             </button>
           </Tooltip>
           <Tooltip content="Export captions">
-            <button className="p-2 hover:bg-gray-100 rounded-lg">
+            <button
+              onClick={exportCaptions}
+              className="p-2 hover:bg-gray-100 rounded-lg"
+            >
               <Download className="w-5 h-5" />
             </button>
           </Tooltip>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".srt,.vtt,text/vtt,text/plain"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = '';
+              if (file) importCaptions(file);
+            }}
+          />
           <Tooltip content="Caption styles">
             <button
               onClick={() => setShowStyleEditor(!showStyleEditor)}
@@ -235,12 +459,52 @@ export const Captions: React.FC<CaptionsProps> = ({ videoRef, videoUrl }) => {
             </button>
           </Tooltip>
           <Tooltip content="Settings">
-            <button className="p-2 hover:bg-gray-100 rounded-lg">
+            <button
+              onClick={() => setShowSettings(!showSettings)}
+              className={`p-2 rounded-lg ${
+                showSettings ? 'bg-[#E44E51]/10 text-[#E44E51]' : 'hover:bg-gray-100'
+              }`}
+            >
               <Settings className="w-5 h-5" />
             </button>
           </Tooltip>
         </div>
       </div>
+
+      {showSettings && (
+        <div className="p-4 bg-gray-50 rounded-lg grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="caption-language">
+              Recognition language
+            </label>
+            <select
+              id="caption-language"
+              value={settings.language}
+              onChange={(e) => setSettings(s => ({ ...s, language: e.target.value }))}
+              className="w-full rounded-lg border-gray-300 shadow-sm text-sm"
+            >
+              {RECOGNITION_LANGUAGES.map(lang => (
+                <option key={lang.code} value={lang.code}>{lang.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="caption-export-format">
+              Export format
+            </label>
+            <select
+              id="caption-export-format"
+              value={settings.exportFormat}
+              onChange={(e) => setSettings(s => ({ ...s, exportFormat: e.target.value as CaptionFormat }))}
+              className="w-full rounded-lg border-gray-300 shadow-sm text-sm"
+            >
+              <option value="srt">SubRip (.srt)</option>
+              <option value="vtt">WebVTT (.vtt)</option>
+              <option value="json">JSON</option>
+            </select>
+          </div>
+        </div>
+      )}
 
       <div className="space-y-4">
         {/* Quick Settings */}
@@ -496,10 +760,12 @@ export const Captions: React.FC<CaptionsProps> = ({ videoRef, videoUrl }) => {
           <button
             onClick={() => {
               setCaptions([]);
+              setStatus(null);
               setSettings({
                 autoGenerate: true,
-                autoTranslate: false,
                 speakerDetection: true,
+                language: 'en-US',
+                exportFormat: 'srt',
                 style: {
                   font: 'Arial',
                   size: 16,
@@ -516,6 +782,15 @@ export const Captions: React.FC<CaptionsProps> = ({ videoRef, videoUrl }) => {
             Reset
           </button>
           <div className="flex space-x-2">
+            {processing && (
+              <button
+                onClick={stopRecognition}
+                className="flex items-center space-x-2 px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300"
+              >
+                <Square className="w-4 h-4" />
+                <span>Stop</span>
+              </button>
+            )}
             <button
               onClick={generateCaptions}
               disabled={processing}
