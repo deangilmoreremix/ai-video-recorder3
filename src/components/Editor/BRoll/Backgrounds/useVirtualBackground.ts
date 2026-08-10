@@ -141,10 +141,10 @@ export const useVirtualBackground = (enabled: boolean) => {
         if (!aCtx) return IDLE_RESULT;
         aCtx.drawImage(video, 0, 0, aw, ah);
 
+        // MediaPipeSelfieSegmentation only supports `flipHorizontal` here; the
+        // foreground threshold is applied when the mask is rasterised below.
         const segmentation = await segmenter.segmentPeople(analysis, {
-          multiSegmentation: false,
-          segmentBodyParts: false,
-          segmentationThreshold: settings.threshold
+          flipHorizontal: false
         });
 
         if (segmentation.length === 0) {

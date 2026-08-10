@@ -121,6 +121,32 @@ const getFaceBox = (face: faceLandmarksDetection.Face): Rect | null => {
   return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
 };
 
+/**
+ * FaceMesh runs on the downscaled analysis canvas, so its keypoints/box are in
+ * analysis space. Convert them back to source-video space (`inv` = 1 / scale)
+ * before they are mapped onto the output canvas.
+ */
+const scaleFaceToSource = (
+  face: faceLandmarksDetection.Face,
+  inv: number
+): faceLandmarksDetection.Face => {
+  const box = face.box;
+  return {
+    ...face,
+    box: box
+      ? {
+          xMin: box.xMin * inv,
+          yMin: box.yMin * inv,
+          xMax: box.xMax * inv,
+          yMax: box.yMax * inv,
+          width: box.width * inv,
+          height: box.height * inv
+        }
+      : box,
+    keypoints: face.keypoints.map(k => ({ ...k, x: k.x * inv, y: k.y * inv }))
+  };
+};
+
 /** Decide a facial expression from tracked landmark geometry (no model needed). */
 const classifyExpression = (keypoints: { x: number; y: number }[], sensitivity: number): string => {
   const at = (i: number) => keypoints[i];
@@ -408,10 +434,15 @@ export const useAIFeatures = () => {
       if (needPose && !loadedModelTypes.current.has('pose')) {
         update('poseEstimation', 'loading');
         try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const poseConfig: any = {
-            runtime: 'tfjs',
-            modelType: processingQuality === 'high' ? 'SINGLEPOSE_LIGHTNING' : 'SINGLEPOSE_THUNDER'
+          // MoveNet expects the literal model ids exported by the package
+          // ('SinglePose.Lightning' / 'SinglePose.Thunder'); anything else makes
+          // `createDetector` throw "Invalid architecture". Thunder is the
+          // higher-accuracy (slower) model, Lightning the fast one.
+          const poseConfig: poseDetection.MoveNetModelConfig = {
+            modelType: processingQuality === 'high'
+              ? poseDetection.movenet.modelType.SINGLEPOSE_THUNDER
+              : poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING,
+            enableSmoothing: true
           };
           loadedModels.pose = await poseDetection.createDetector(
             poseDetection.SupportedModels.MoveNet,
@@ -778,10 +809,12 @@ export const useAIFeatures = () => {
 
         if ((f.facialLandmarks.enabled || f.expressionDetection.enabled || f.beautification.enabled) && m.faceLandmarks && faces.length > 0) {
           if (frameCount.current % detectEvery === 0) {
-            lastFaceMeshes.current = await m.faceLandmarks.estimateFaces(analysisCanvas, {
+            const meshes = await m.faceLandmarks.estimateFaces(analysisCanvas, {
               flipHorizontal: false,
               staticImageMode: false
             });
+            // Results are in analysis-canvas space: bring them back to source space.
+            lastFaceMeshes.current = meshes.map(face => scaleFaceToSource(face, 1 / scale));
           }
           for (const face of lastFaceMeshes.current) {
             const kp = face.keypoints;
@@ -829,7 +862,13 @@ export const useAIFeatures = () => {
       // ---- Hand pose + gesture ----
       if ((f.handPoseEstimation.enabled || f.gestureRecognition.enabled) && m.handPose) {
         if (frameCount.current % detectEvery === 0) {
-          lastHands.current = await m.handPose.estimateHands(analysisCanvas, { flipHorizontal: false });
+          const hands = await m.handPose.estimateHands(analysisCanvas, { flipHorizontal: false });
+          // Keypoints come back in analysis-canvas space: bring them back to
+          // source-video space before they are mapped onto the output canvas.
+          lastHands.current = hands.map(hand => ({
+            ...hand,
+            keypoints: hand.keypoints.map(k => ({ ...k, x: k.x / scale, y: k.y / scale }))
+          }));
         }
         for (const hand of lastHands.current) {
           const kp = hand.keypoints;
@@ -872,7 +911,12 @@ export const useAIFeatures = () => {
       // ---- Pose estimation (MoveNet skeleton) ----
       if (f.poseEstimation.enabled && m.pose) {
         if (frameCount.current % detectEvery === 0) {
-          lastPoses.current = await m.pose.estimatePoses(analysisCanvas, { flipHorizontal: false });
+          const poses = await m.pose.estimatePoses(analysisCanvas, { flipHorizontal: false });
+          // Same analysis-space -> source-space conversion as the hand model.
+          lastPoses.current = poses.map(pose => ({
+            ...pose,
+            keypoints: pose.keypoints.map(k => ({ ...k, x: k.x / scale, y: k.y / scale }))
+          }));
         }
         for (const pose of lastPoses.current) {
           const kp = pose.keypoints;
@@ -903,13 +947,26 @@ export const useAIFeatures = () => {
 
       // ---- Background removal / blur ----
       if ((f.backgroundRemoval.enabled || f.backgroundBlur.enabled) && m.bodySegmentation) {
+        // MediaPipeSelfieSegmentation only understands `flipHorizontal`; the
+        // foreground cut-off is applied when the mask is rasterised below.
         const seg = await m.bodySegmentation.segmentPeople(analysisCanvas, {
-          multiSegmentation: false,
-          segmentBodyParts: false,
-          segmentationThreshold: 0.5
+          flipHorizontal: false
         });
         if (seg.length > 0) {
-          const mask = await bodySegmentation.toBinaryMask(seg, { r: 0, g: 0, b: 0, a: 0 }, { r: 0, g: 0, b: 0, a: 255 });
+          const threshold = clamp(
+            f.backgroundRemoval.enabled ? f.backgroundRemoval.sensitivity : 0.5,
+            0.1,
+            0.9
+          );
+          // Person pixels opaque / background transparent so the mask can be
+          // used as a `destination-in` alpha key for the foreground below.
+          const mask = await bodySegmentation.toBinaryMask(
+            seg,
+            { r: 0, g: 0, b: 0, a: 255 },
+            { r: 0, g: 0, b: 0, a: 0 },
+            false,
+            threshold
+          );
           const maskCanvas = getScratchCanvas('mask', mask.width, mask.height);
           const maskCtx = maskCanvas.getContext('2d');
           if (maskCtx) {

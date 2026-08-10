@@ -169,7 +169,7 @@ export const VideoRecorder: React.FC = () => {
   const recordedDurationRef = useRef(0);
 
   // AI Features
-  const { features, toggleFeature, loadModels, processFrame, isModelsLoaded } = useAIFeatures();
+  const { features, toggleFeature, loadModels, processFrame } = useAIFeatures();
 
   /** At least one AI effect is switched on – the take has to be processed. */
   const aiEnabled = useMemo(
@@ -183,7 +183,6 @@ export const VideoRecorder: React.FC = () => {
   // what makes the side-panel toggles drive the canvas (and therefore the
   // recording) while a take is running.
   const processFrameRef = useRef(processFrame);
-  const isModelsLoadedRef = useRef(isModelsLoaded);
   const aiEnabledRef = useRef(aiEnabled);
   // True only while the AI render loop is actually painting the canvas
   const aiCanvasLiveRef = useRef(false);
@@ -196,10 +195,6 @@ export const VideoRecorder: React.FC = () => {
   useEffect(() => {
     processFrameRef.current = processFrame;
   }, [processFrame]);
-
-  useEffect(() => {
-    isModelsLoadedRef.current = isModelsLoaded;
-  }, [isModelsLoaded]);
 
   useEffect(() => {
     aiEnabledRef.current = aiEnabled;
@@ -233,14 +228,17 @@ export const VideoRecorder: React.FC = () => {
           canvas.height = video.videoHeight;
         }
 
-        if (isModelsLoadedRef.current) {
-          try {
-            await processFrameRef.current(video, canvas);
-            aiCanvasPaintedRef.current = true;
-            return true;
-          } catch (err) {
-            console.warn('AI frame processing failed, using the raw frame:', err);
-          }
+        // `processFrame` also applies the model-free effects (exposure,
+        // colour, denoise, stabilisation, scene detection, captions), so it
+        // must run even when no TensorFlow model has been loaded – otherwise
+        // those features would be silently dropped from the recording. It
+        // degrades gracefully on its own while a model is still downloading.
+        try {
+          await processFrameRef.current(video, canvas);
+          aiCanvasPaintedRef.current = true;
+          return true;
+        } catch (err) {
+          console.warn('AI frame processing failed, using the raw frame:', err);
         }
 
         const context = canvas.getContext('2d');
@@ -729,9 +727,23 @@ export const VideoRecorder: React.FC = () => {
         const video = videoRef.current;
         const canvas = aiCanvasRef.current;
 
-        // The canvas needs a correctly sized frame before `captureStream()`
+        // The canvas needs a correctly sized frame before `captureStream()`.
+        // A preview pass can still be in flight painting the *previous*
+        // capture, so retry until the canvas matches the stream that is about
+        // to be recorded – `captureStream()` freezes the track dimensions.
         await waitForVideoFrame(video);
-        const painted = await renderAIFrame(video, canvas);
+        let painted = false;
+        for (let attempt = 0; attempt < 5 && !painted; attempt++) {
+          const drawn = await renderAIFrame(video, canvas);
+          painted =
+            drawn &&
+            canvas.width === video.videoWidth &&
+            canvas.height === video.videoHeight &&
+            canvas.width > 0;
+          if (!painted) {
+            await new Promise(resolve => window.setTimeout(resolve, 50));
+          }
+        }
 
         const aiStream = painted
           ? createCanvasRecordingStream(
