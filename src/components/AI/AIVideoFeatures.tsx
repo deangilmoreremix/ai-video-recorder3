@@ -10,15 +10,31 @@ import { AIFeatureSelector } from './AIFeatureSelector';
 import { AIProcessingOverlay } from './AIProcessingOverlay';
 import { X, Grid, Sliders, Camera, Wand2, Scan, HandMetal, ArrowUp, Trash, Layers, Send, Smile, Focus, CloudFog, Monitor, Sparkles, Filter, Palette, Gauge, Wind, Mic } from 'lucide-react';
 import { AIFeatureGrid } from './AIFeatureGrid';
-import { useAIFeatures } from '../../hooks/useAIFeatures';
+import { AIFeatures } from '../../hooks/useAIFeatures';
 
 interface AIVideoFeaturesProps {
   videoRef: React.RefObject<HTMLVideoElement>;
+  features: AIFeatures;
+  toggleFeature: (featureId: string) => void;
+  processFrame: (video: HTMLVideoElement, canvas: HTMLCanvasElement) => Promise<void>;
+  processVideo: (
+    video: HTMLVideoElement,
+    canvas: HTMLCanvasElement,
+    options?: { fps?: number; mimeType?: string; onProgress?: (p: number) => void; signal?: AbortSignal }
+  ) => Promise<Blob>;
+  processingQuality: 'low' | 'medium' | 'high';
+  setProcessingQuality: (quality: 'low' | 'medium' | 'high') => void;
   onProcessingComplete?: (processedBlob: Blob) => void;
 }
 
 export const AIVideoFeatures: React.FC<AIVideoFeaturesProps> = ({
   videoRef,
+  features,
+  toggleFeature,
+  processFrame,
+  processVideo,
+  processingQuality,
+  setProcessingQuality,
   onProcessingComplete
 }) => {
   const [activeFeature, setActiveFeature] = useState<string | null>(null);
@@ -28,16 +44,6 @@ export const AIVideoFeatures: React.FC<AIVideoFeaturesProps> = ({
   const [showSettings, setShowSettings] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const outputCanvasRef = useRef<HTMLCanvasElement>(null);
-
-  // Get AI features from our hook
-  const {
-    features,
-    toggleFeature,
-    processFrame,
-    processVideo,
-    processingQuality,
-    setProcessingQuality
-  } = useAIFeatures();
 
   // Process frames in real-time on the overlay canvas.
   useEffect(() => {

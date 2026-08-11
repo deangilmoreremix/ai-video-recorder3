@@ -2,13 +2,20 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { Video, Upload, Volume2, Play, Pause, Square, Brain, Camera, Monitor, Layout, Settings, Mic, MicOff, Sliders, RefreshCw, X, AlertCircle } from 'lucide-react';
 import { useAIFeatures } from '../../hooks/useAIFeatures';
 import {
+  clampPipInset,
   createCanvasRecordingStream,
   createMediaRecorder,
+  createPipCompositor,
+  DEFAULT_PIP_INSET,
   getMediaErrorMessage,
   getMediaSupportError,
   getMimeCandidates,
   mixAudioTracks,
-  MixedAudio
+  MixedAudio,
+  PIP_MAX_INSET_WIDTH,
+  PIP_MIN_INSET_WIDTH,
+  PipCompositor,
+  PipInset
 } from '../../hooks/useVideoRecorder';
 import { AIFeatureGrid } from '../AI/AIFeatureGrid';
 import { AIVideoFeatures } from '../AI/AIVideoFeatures';
@@ -111,6 +118,16 @@ export const VideoRecorder: React.FC = () => {
   const [selectedCameraId, setSelectedCameraId] = useState<string>('');
   const [showVideoMenu, setShowVideoMenu] = useState(false);
 
+  // PiP state: geometry of the webcam inset drawn over the screen capture,
+  // held as fractions of the composited frame so it is independent of the
+  // recording resolution. This is what the compositor paints every frame.
+  const [pipInset, setPipInset] = useState<PipInset>(DEFAULT_PIP_INSET);
+  // Inset height per unit of inset width – mirrors the compositor's maths so
+  // the draggable handle has the same proportions as the recorded inset.
+  const [pipInsetHeightRatio, setPipInsetHeightRatio] = useState(1);
+  // True while the PiP compositor is producing the recorded picture
+  const [isCompositingPip, setIsCompositingPip] = useState(false);
+
   // AI state
   const [showAIFeatures, setShowAIFeatures] = useState(false);
   const [videoProcessed, setVideoProcessed] = useState(false);
@@ -167,9 +184,17 @@ export const VideoRecorder: React.FC = () => {
   // the capture tracks have been released.
   const recordedSizeRef = useRef({ width: 0, height: 0 });
   const recordedDurationRef = useRef(0);
+  // PiP compositor (screen + webcam → one canvas) driving a PiP recording
+  const pipCompositorRef = useRef<PipCompositor | null>(null);
+  // Inset geometry mirrored in refs: the compositor render loop and the pointer
+  // drag handlers both live outside React's render cycle.
+  const pipInsetRef = useRef<PipInset>(pipInset);
+  const pipInsetHeightRatioRef = useRef(1);
+  // Bounds used to translate a pointer drag into inset fractions
+  const pipOverlayRef = useRef<HTMLDivElement>(null);
 
-  // AI Features
-  const { features, toggleFeature, loadModels, processFrame } = useAIFeatures();
+  // AI Features (single shared instance – also passed down to AIVideoFeatures)
+  const { features, toggleFeature, loadModels, processFrame, processVideo, processingQuality, setProcessingQuality } = useAIFeatures();
 
   /** At least one AI effect is switched on – the take has to be processed. */
   const aiEnabled = useMemo(
@@ -199,6 +224,18 @@ export const VideoRecorder: React.FC = () => {
   useEffect(() => {
     aiEnabledRef.current = aiEnabled;
   }, [aiEnabled]);
+
+  // The compositor render loop reads the inset from a ref every frame, so
+  // dragging/resizing shows up in the preview *and* in the recording at once.
+  useEffect(() => {
+    pipInsetRef.current = pipInset;
+  }, [pipInset]);
+
+  // The mic slider drives a GainNode inside the live audio graph, so moving it
+  // rescales the microphone in the take that is being recorded.
+  useEffect(() => {
+    audioMixRef.current?.setMicVolume(micVolume);
+  }, [micVolume]);
 
   // Run the AI pipeline while the take is being recorded from the canvas, and
   // while the live preview is shown so the toggles are immediately visible.
@@ -408,9 +445,17 @@ export const VideoRecorder: React.FC = () => {
     setIsBakingAI(false);
   };
 
+  /** Stops the PiP compositor (render loop + canvas capture + helper videos). */
+  const releasePipCompositor = () => {
+    pipCompositorRef.current?.stop();
+    pipCompositorRef.current = null;
+    setIsCompositingPip(false);
+  };
+
   // Release every capture track (camera, mic, screen) plus the audio mixer
   const releaseStream = () => {
     releaseAIRecordingStream();
+    releasePipCompositor();
     streamRef.current?.getTracks().forEach(track => track.stop());
     streamRef.current = null;
     sourceStreamsRef.current.forEach(source => {
@@ -517,6 +562,8 @@ export const VideoRecorder: React.FC = () => {
       streamRef.current = null;
       aiRecordingStreamRef.current?.getVideoTracks().forEach(track => track.stop());
       aiRecordingStreamRef.current = null;
+      pipCompositorRef.current?.stop();
+      pipCompositorRef.current = null;
       sourceStreamsRef.current.forEach(source => {
         source.getTracks().forEach(track => track.stop());
       });
@@ -632,16 +679,15 @@ export const VideoRecorder: React.FC = () => {
             console.warn('Unable to access microphone, recording without it:', err);
           }
 
-          const audioTracks = [
-            ...screenStream.getAudioTracks(),
-            ...(micStream ? micStream.getAudioTracks() : [])
-          ];
+          const micTracks = micStream ? micStream.getAudioTracks() : [];
+          const audioTracks = [...screenStream.getAudioTracks(), ...micTracks];
           if (isMicMuted && micStream) {
             micStream.getAudioTracks().forEach(track => { track.enabled = false; });
           }
 
-          // MediaRecorder only keeps the first audio track – mix system + mic audio
-          audioMixRef.current = mixAudioTracks(audioTracks);
+          // MediaRecorder only keeps the first audio track – mix system + mic
+          // audio, with the microphone scaled by the mic volume slider.
+          audioMixRef.current = mixAudioTracks(audioTracks, { micTracks, micVolume });
 
           stream = new MediaStream([
             ...screenStream.getVideoTracks(),
@@ -674,29 +720,75 @@ export const VideoRecorder: React.FC = () => {
             webcamStream.getAudioTracks().forEach(track => { track.enabled = false; });
           }
 
-          // We keep the webcam video plus a single mixed audio track
-          const audioTracks = [
-            ...displayStream.getAudioTracks(),
-            ...webcamStream.getAudioTracks()
-          ];
-          audioMixRef.current = mixAudioTracks(audioTracks);
+          // MediaRecorder only keeps the first audio track – mix system + mic
+          // audio, with the microphone scaled by the mic volume slider.
+          const micTracks = webcamStream.getAudioTracks();
+          const audioTracks = [...displayStream.getAudioTracks(), ...micTracks];
+          audioMixRef.current = mixAudioTracks(audioTracks, { micTracks, micVolume });
+          const recordedAudio = audioMixRef.current
+            ? [audioMixRef.current.track]
+            : audioTracks.slice(0, 1);
 
-          stream = new MediaStream([
-            ...webcamStream.getVideoTracks(),
-            ...(audioMixRef.current ? [audioMixRef.current.track] : audioTracks.slice(0, 1))
-          ]);
+          // MediaRecorder also only records the FIRST video track, so a stream
+          // holding both captures would silently drop the webcam – there would
+          // be no picture-in-picture at all. Composite the screen (full frame)
+          // and the webcam (draggable/resizable inset) onto one canvas and
+          // record that canvas, keeping the mixed audio track.
+          const compositor = await createPipCompositor({
+            screenStream: displayStream,
+            webcamStream,
+            getInset: () => pipInsetRef.current,
+            frameRate: frameRate > 0 ? frameRate : AI_CANVAS_FPS,
+            fallbackSize: RESOLUTION_PRESETS[resolution]
+          });
+
+          if (compositor) {
+            pipCompositorRef.current = compositor;
+            pipInsetHeightRatioRef.current = compositor.insetHeightRatio;
+            setPipInsetHeightRatio(compositor.insetHeightRatio);
+            // Keep the stored geometry inside the freshly measured frame
+            const clamped = clampPipInset(pipInsetRef.current, compositor.insetHeightRatio);
+            pipInsetRef.current = clamped;
+            setPipInset(clamped);
+            setIsCompositingPip(true);
+
+            stream = new MediaStream([
+              ...compositor.stream.getVideoTracks(),
+              ...recordedAudio
+            ]);
+          } else {
+            // Canvas capture unavailable – record the screen on its own rather
+            // than a stream whose webcam track would be thrown away.
+            console.warn('PiP compositing is unavailable – recording the screen only.');
+            stream = new MediaStream([
+              ...displayStream.getVideoTracks(),
+              ...recordedAudio
+            ]);
+          }
           break;
         }
 
         default: { // webcam
-          stream = await navigator.mediaDevices.getUserMedia({ 
+          const webcamStream = await navigator.mediaDevices.getUserMedia({ 
             video: videoConstraints,
             audio: audioConstraints
           });
-          acquired.push(stream);
+          acquired.push(webcamStream);
           if (isMicMuted) {
-            stream.getAudioTracks().forEach(track => { track.enabled = false; });
+            webcamStream.getAudioTracks().forEach(track => { track.enabled = false; });
           }
+
+          // A single microphone needs no mixing, but the mic volume slider must
+          // still scale it – `mixAudioTracks` routes it through a GainNode and
+          // returns null when the raw track can be recorded untouched.
+          const micTracks = webcamStream.getAudioTracks();
+          audioMixRef.current = mixAudioTracks(micTracks, { micTracks, micVolume });
+          stream = audioMixRef.current
+            ? new MediaStream([
+                ...webcamStream.getVideoTracks(),
+                audioMixRef.current.track
+              ])
+            : webcamStream;
           break;
         }
       }
@@ -794,14 +886,17 @@ export const VideoRecorder: React.FC = () => {
         const thumbnailPromise = captureThumbnail();
 
         // Remember the geometry of what was actually recorded (the AI canvas
-        // when AI is baked in) – it is gone once the tracks are stopped.
-        const recordedCanvas = aiRecordingStreamRef.current ? aiCanvasRef.current : null;
+        // when AI is baked in, the PiP composite canvas for a PiP take) – it is
+        // gone once the tracks are stopped.
+        const bakedAI = aiRecordingStreamRef.current !== null && aiCanvasRef.current !== null;
+        const recordedCanvas = bakedAI
+          ? aiCanvasRef.current
+          : pipCompositorRef.current?.canvas ?? null;
         recordedSizeRef.current = {
           width: recordedCanvas ? recordedCanvas.width : (videoRef.current?.videoWidth ?? 0),
           height: recordedCanvas ? recordedCanvas.height : (videoRef.current?.videoHeight ?? 0)
         };
         recordedDurationRef.current = recordingTimeRef.current;
-        const bakedAI = recordedCanvas !== null;
 
         // Clean up recording resources
         stopTimer();
@@ -834,8 +929,14 @@ export const VideoRecorder: React.FC = () => {
         setShowDownloadDialog(true);
       };
 
-      // Screen sharing can be ended from the browser UI – finish cleanly
-      stream.getVideoTracks().forEach(track => {
+      // Screen sharing can be ended from the browser UI – finish cleanly. For a
+      // PiP take the recorded track is the composite canvas, which never ends on
+      // its own, so the source captures are watched as well.
+      const watchedTracks = new Set<MediaStreamTrack>([
+        ...stream.getVideoTracks(),
+        ...acquired.flatMap(source => source.getVideoTracks())
+      ]);
+      watchedTracks.forEach(track => {
         track.onended = () => {
           if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
             mediaRecorderRef.current.stop();
@@ -852,6 +953,7 @@ export const VideoRecorder: React.FC = () => {
     } catch (err) {
       console.error('Error starting recording:', err);
       releaseAIRecordingStream();
+      releasePipCompositor();
       stream?.getTracks().forEach(track => track.stop());
       acquired.forEach(source => source.getTracks().forEach(track => track.stop()));
       audioMixRef.current?.close();
@@ -901,6 +1003,51 @@ export const VideoRecorder: React.FC = () => {
       setIsPaused(false);
       startTimer(maxDurationRef.current);
     }
+  };
+
+  /**
+   * Pointer drag on the PiP overlay: moves the webcam inset, or resizes it when
+   * the corner handle is grabbed. The geometry is kept as fractions of the
+   * composited frame – exactly what the compositor paints – so the box on
+   * screen always matches the inset in the recording.
+   */
+  const startPipDrag =
+    (mode: 'move' | 'resize') => (event: React.PointerEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const bounds = pipOverlayRef.current?.getBoundingClientRect();
+      if (!bounds || !bounds.width || !bounds.height) return;
+
+      const origin = pipInsetRef.current;
+      const startX = event.clientX;
+      const startY = event.clientY;
+      const heightRatio = pipInsetHeightRatioRef.current;
+
+      const handleMove = (moveEvent: PointerEvent) => {
+        const deltaX = (moveEvent.clientX - startX) / bounds.width;
+        const deltaY = (moveEvent.clientY - startY) / bounds.height;
+        const next =
+          mode === 'move'
+            ? { ...origin, x: origin.x + deltaX, y: origin.y + deltaY }
+            : { ...origin, width: origin.width + deltaX };
+        setPipInset(clampPipInset(next, heightRatio));
+      };
+
+      const handleEnd = () => {
+        window.removeEventListener('pointermove', handleMove);
+        window.removeEventListener('pointerup', handleEnd);
+        window.removeEventListener('pointercancel', handleEnd);
+      };
+
+      window.addEventListener('pointermove', handleMove);
+      window.addEventListener('pointerup', handleEnd);
+      window.addEventListener('pointercancel', handleEnd);
+    };
+
+  /** Resizes the webcam inset from the size slider. */
+  const handlePipSizeChange = (width: number) => {
+    setPipInset(clampPipInset({ ...pipInsetRef.current, width }, pipInsetHeightRatioRef.current));
   };
 
   /** Runs the optional countdown overlay, then starts the actual recording. */
@@ -1156,6 +1303,43 @@ export const VideoRecorder: React.FC = () => {
             aiCanvasActive ? '' : 'hidden'
           }`}
         />
+
+        {/*
+          PiP inset handle: the preview above already shows the composited
+          frame (the <video> plays the compositor's canvas capture), so this
+          layer only edits the geometry the compositor draws with – drag the box
+          to move the webcam, drag the corner to resize it. Both apply to the
+          recording immediately.
+        */}
+        {isCompositingPip && (
+          <div ref={pipOverlayRef} className="absolute inset-0 z-20">
+            <div
+              onPointerDown={startPipDrag('move')}
+              style={{
+                left: `${pipInset.x * 100}%`,
+                top: `${pipInset.y * 100}%`,
+                width: `${pipInset.width * 100}%`,
+                height: `${pipInset.width * pipInsetHeightRatio * 100}%`,
+                touchAction: 'none'
+              }}
+              className="absolute border-2 border-white/80 hover:border-[#E44E51] rounded-sm cursor-move"
+            >
+              <span className="absolute -top-5 left-0 px-1 rounded bg-black/60 text-white 
+                text-[10px] whitespace-nowrap pointer-events-none">
+                Drag to move
+              </span>
+              <div
+                onPointerDown={startPipDrag('resize')}
+                style={{ touchAction: 'none' }}
+                role="button"
+                tabIndex={-1}
+                aria-label="Resize webcam inset"
+                className="absolute -right-1.5 -bottom-1.5 w-3.5 h-3.5 rounded-sm bg-white 
+                  border border-gray-500 cursor-nwse-resize"
+              />
+            </div>
+          </div>
+        )}
         
         {/* Upload Overlay - only show when not recording */}
         {!isRecording && (
@@ -1184,6 +1368,12 @@ export const VideoRecorder: React.FC = () => {
           <div className="absolute inset-0 z-20">
             <AIVideoFeatures
               videoRef={videoRef}
+              features={features}
+              toggleFeature={toggleFeature}
+              processFrame={processFrame}
+              processVideo={processVideo}
+              processingQuality={processingQuality}
+              setProcessingQuality={setProcessingQuality}
               onProcessingComplete={handleAIProcessingComplete}
             />
             <button
@@ -1628,6 +1818,34 @@ export const VideoRecorder: React.FC = () => {
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/*
+          PiP inset size – the same value the corner handle drags, exposed as a
+          slider so it can also be set without a pointer drag.
+        */}
+        {isCompositingPip && (
+          <div className="flex items-center justify-between bg-gray-50 rounded-lg px-4 py-2">
+            <span className="text-sm text-gray-600 flex items-center">
+              <Layout className="w-4 h-4 mr-2" />
+              Webcam inset size
+            </span>
+            <div className="flex items-center space-x-2">
+              <input
+                type="range"
+                min={PIP_MIN_INSET_WIDTH}
+                max={PIP_MAX_INSET_WIDTH}
+                step="0.01"
+                value={pipInset.width}
+                onChange={(e) => handlePipSizeChange(parseFloat(e.target.value))}
+                className="w-32 accent-[#E44E51]"
+                aria-label="Webcam inset size"
+              />
+              <span className="text-xs text-gray-500 w-10 text-right">
+                {Math.round(pipInset.width * 100)}%
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* Record Button */}
         <div className="flex justify-center space-y-2">
