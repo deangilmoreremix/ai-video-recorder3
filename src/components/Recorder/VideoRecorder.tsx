@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Video, Upload, Volume2, Play, Pause, Square, Brain, Camera, Monitor, Layout, Settings, Mic, MicOff, Sliders, RefreshCw, X, AlertCircle } from 'lucide-react';
-import { useAIFeatures } from '../../hooks/useAIFeatures';
+import { AIFeaturesProvider, useAIFeaturesContext } from '../../hooks/useAIFeaturesContext';
 import {
   clampPipInset,
   createCanvasRecordingStream,
@@ -95,6 +95,17 @@ const waitForVideoFrame = (video: HTMLVideoElement, timeoutMs = 3000): Promise<b
   });
 
 export const VideoRecorder: React.FC = () => {
+  return (
+    <AIFeaturesProvider>
+      <VideoRecorderInner />
+    </AIFeaturesProvider>
+  );
+};
+
+const VideoRecorderInner: React.FC = () => {
+  // AI Features (shared single instance provided by AIFeaturesProvider above)
+  const { features, toggleFeature, loadModels, processFrame, processVideo, processingQuality, setProcessingQuality } = useAIFeaturesContext();
+
   // Recording state
   const [recordingMode, setRecordingMode] = useState<'webcam' | 'screen' | 'pip'>('webcam');
   const [isRecording, setIsRecording] = useState(false);
@@ -192,9 +203,6 @@ export const VideoRecorder: React.FC = () => {
   const pipInsetHeightRatioRef = useRef(1);
   // Bounds used to translate a pointer drag into inset fractions
   const pipOverlayRef = useRef<HTMLDivElement>(null);
-
-  // AI Features (single shared instance – also passed down to AIVideoFeatures)
-  const { features, toggleFeature, loadModels, processFrame, processVideo, processingQuality, setProcessingQuality } = useAIFeatures();
 
   /** At least one AI effect is switched on – the take has to be processed. */
   const aiEnabled = useMemo(

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Brain, Sparkles, Settings, Play, Pause, Download, Share2 } from 'lucide-react';
-import { useAIFeatures } from '../../hooks/useAIFeatures';
+import { useAIFeaturesContext } from '../../hooks/useAIFeaturesContext';
 import { createCanvasRecordingStream, createMediaRecorder } from '../../hooks/useVideoRecorder';
 import { AIFeatureGrid } from '../AI/AIFeatureGrid';
 import { AIProcessingOverlay } from '../AI/AIProcessingOverlay';
@@ -68,7 +68,7 @@ export const AIPreviewEditor: React.FC<AIPreviewEditorProps> = ({
     toggleFeature,
     processFrame,
     isModelsLoaded
-  } = useAIFeatures();
+  } = useAIFeaturesContext();
 
   // Mirrors so the render loop always uses the latest processor without
   // being torn down every time a feature is toggled.

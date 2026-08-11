@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { RefreshCw, Settings, Video, Download, Eye } from 'lucide-react';
-import { useAIFeatures } from '../../hooks/useAIFeatures';
+import { useAIFeaturesContext } from '../../hooks/useAIFeaturesContext';
 import {
   getScratchCanvas,
   toGrayscale,
@@ -41,7 +41,7 @@ export const VideoStabilization: React.FC<VideoStabilizationProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [hud, setHud] = useState({ dx: 0, dy: 0 });
 
-  const { processVideo } = useAIFeatures();
+  const { processVideo } = useAIFeaturesContext();
   const stabilizer = useRef(new FrameStabilizer());
   const prevGray = useRef<{ w: number; h: number; data: Uint8Array } | null>(null);
   const estMotion = useRef({ x: 0, y: 0 });
